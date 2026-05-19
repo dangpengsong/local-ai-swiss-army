@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地AI工具箱</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f0f1a;--bg2:#1a1a2e;--bg3:#222240;
+  --accent:#e94560;--accent2:#ff6b81;
+  --text:#f0f0f5;--muted:#8888a0;
+  --green:#4ecca3;--yellow:#f0c040;--blue:#4ea8de;
+  --radius:12px;--shadow:0 4px 24px rgba(0,0,0,0.4);
+}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
+
+/* ===== 顶部导航 ===== */
+.nav{background:var(--bg2);padding:0 24px;display:flex;align-items:stretch;height:56px;border-bottom:2px solid var(--accent);position:sticky;top:0;z-index:100}
+.nav-brand{display:flex;align-items:center;gap:8px;font-size:18px;font-weight:800;color:var(--accent);margin-right:32px;flex-shrink:0;letter-spacing:-0.5px}
+.nav-brand svg{width:24px;height:24px;flex-shrink:0}
+.nav-brand span{font-size:12px;font-weight:400;color:var(--muted);margin-left:2px;white-space:nowrap}
+.nav-tabs{display:flex;gap:2px;overflow-x:auto}
+.nav-tabs button{
+  background:transparent;color:var(--muted);border:none;padding:0 18px;
+  font-size:14px;cursor:pointer;position:relative;transition:color .2s;
+  white-space:nowrap;display:flex;align-items:center;gap:6px;
+}
+.nav-tabs button:hover{color:var(--text);background:rgba(255,255,255,0.03)}
+.nav-tabs button.active{color:var(--accent)}
+.nav-tabs button.active::after{content:'';position:absolute;bottom:0;left:12px;right:12px;height:2px;background:var(--accent);border-radius:1px}
+.nav-tabs button svg{width:16px;height:16px}
+
+/* ===== 状态栏 ===== */
+.status-bar{display:flex;gap:10px;padding:10px 24px;background:var(--bg2);border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;align-items:center}
+.status-item{display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,0.04)}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.status-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-dot.mock{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
+.status-label{color:var(--muted)}
+.status-val{font-weight:600}
+.status-val.mock{color:var(--yellow)}.status-val.real{color:var(--green)}
+
+/* ===== 主布局 ===== */
+.main{max-width:1100px;margin:0 auto;padding:24px}
+.tab-content{display:none}.tab-content.active{display:block}
+
+/* ===== 卡片 ===== */
+.card{background:var(--bg2);border-radius:var(--radius);padding:24px;margin-bottom:20px;box-shadow:var(--shadow);border:1px solid rgba(255,255,255,0.04)}
+.card-title{font-size:20px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:10px}
+.card-title svg{width:22px;height:22px;color:var(--accent)}
+.card-desc{font-size:13px;color:var(--muted);margin-bottom:20px}
+
+/* ===== 表单控件 ===== */
+.field{margin-bottom:16px}
+.field-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+textarea,input[type="text"],select{
+  width:100%;padding:10px 14px;border-radius:8px;
+  border:1px solid rgba(255,255,255,0.08);background:var(--bg);
+  color:var(--text);font-size:14px;font-family:inherit;
+  transition:border-color .2s,box-shadow .2s;
+}
+textarea:focus,input[type="text"]:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(233,69,96,0.15)}
+textarea{min-height:100px;resize:vertical;line-height:1.5}
+select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238888a0'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px}
+.row{display:flex;gap:12px;align-items:flex-end}
+.row .field{flex:1}
+
+/* 文件上传区 */
+.upload-zone{
+  border:2px dashed rgba(255,255,255,0.1);border-radius:8px;padding:24px;
+  text-align:center;cursor:pointer;transition:all .2s;background:rgba(255,255,255,0.01);
+  position:relative;
+}
+.upload-zone:hover{border-color:var(--accent);background:rgba(233,69,96,0.04)}
+.upload-zone.has-file{border-color:var(--green);background:rgba(78,204,163,0.04)}
+.upload-zone svg{width:32px;height:32px;color:var(--muted);margin-bottom:8px}
+.upload-zone p{font-size:13px;color:var(--muted)}
+.upload-zone .file-name{font-size:13px;color:var(--green);font-weight:600;margin-top:6px}
+.upload-zone input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+/* 图片预览 */
+.preview-img{max-width:100%;max-height:200px;border-radius:8px;margin-top:8px;border:1px solid rgba(255,255,255,0.08)}
+
+/* ===== 按钮 ===== */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:10px 24px;border-radius:8px;border:none;
+  font-size:14px;font-weight:600;cursor:pointer;
+  transition:all .2s;
+}
+.btn svg{width:16px;height:16px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2);transform:translateY(-1px);box-shadow:0 4px 12px rgba(233,69,96,0.3)}
+.btn-primary:disabled{opacity:0.4;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-sm{padding:6px 14px;font-size:12px;border-radius:6px}
+.btn-ghost{background:rgba(255,255,255,0.06);color:var(--text)}
+.btn-ghost:hover{background:rgba(255,255,255,0.1)}
+
+/* ===== 结果区域 ===== */
+.result-area{margin-top:20px;display:none}
+.result-area.visible{display:block}
+.result-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.result-badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase}
+.badge-mock{background:rgba(240,192,64,0.15);color:var(--yellow)}
+.badge-real{background:rgba(78,204,163,0.15);color:var(--green)}
+.result-meta{font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+.result-meta span{display:flex;align-items:center;gap:4px}
+.result-body{
+  background:var(--bg);border-radius:8px;padding:20px;
+  border:1px solid rgba(255,255,255,0.06);
+  font-size:15px;line-height:1.7;
+  position:relative;
+}
+.result-body audio{width:100%;margin-top:8px;border-radius:8px}
+
+/* 管线步骤可视化 */
+.pipe-vis{display:flex;align-items:center;gap:0;margin:20px 0;flex-wrap:wrap}
+.pipe-step{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:10px 16px;border-radius:8px;
+  background:var(--bg);border:1px solid rgba(255,255,255,0.06);
+  min-width:90px;transition:all .3s;position:relative;
+}
+.pipe-step .step-icon{font-size:20px}
+.pipe-step .step-name{font-size:11px;color:var(--muted);font-weight:600}
+.pipe-step .step-model{font-size:10px;color:var(--accent)}
+.pipe-step .step-time{font-size:10px;color:var(--muted)}
+.pipe-step.running{border-color:var(--blue);box-shadow:0 0 12px rgba(78,168,222,0.2)}
+.pipe-step.done{border-color:var(--green)}
+.pipe-step.error{border-color:var(--accent)}
+.pipe-arrow{color:var(--muted);font-size:16px;padding:0 4px;flex-shrink:0}
+
+/* ===== 管线构建器 ===== */
+.builder-steps{display:flex;flex-direction:column;gap:8px}
+.builder-step{
+  display:flex;align-items:center;gap:8px;padding:10px 14px;
+  background:var(--bg);border-radius:8px;border:1px solid rgba(255,255,255,0.06);
+}
+.builder-step .step-num{
+  width:24px;height:24px;border-radius:50%;background:var(--accent);
+  color:#fff;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;flex-shrink:0;
+}
+.builder-step select{flex:1}
+.builder-step .step-arrow{color:var(--muted);font-size:14px}
+
+/* ===== 加载 ===== */
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes rec-pulse{0%,100%{box-shadow:0 0 0 0 rgba(233,69,96,0.5)}50%{box-shadow:0 0 0 10px rgba(233,69,96,0)}}
+.btn-recording{background:#c0392b !important;animation:rec-pulse 1.2s ease-in-out infinite}
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+.loading-text{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px;animation:pulse 1.5s ease-in-out infinite}
+
+/* ===== 底部 ===== */
+.footer{text-align:center;padding:20px;color:var(--muted);font-size:12px;border-top:1px solid rgba(255,255,255,0.04);margin-top:20px}
+.footer .mode-badge{display:inline-block;padding:2px 10px;border-radius:20px;margin-left:6px;font-weight:600}
+.mode-badge.mock-mode{background:rgba(240,192,64,0.12);color:var(--yellow)}
+.mode-badge.real-mode{background:rgba(78,204,163,0.12);color:var(--green)}
+
+.hidden{display:none!important}
+@media(max-width:640px){
+  .nav{padding:0 12px;height:48px}
+  .nav-brand{font-size:15px;margin-right:16px}
+  .nav-brand span{display:none}
+  .nav-tabs button{padding:0 12px;font-size:13px}
+  .main{padding:16px 12px}
+  .card{padding:16px}
+  .row{flex-direction:column}
+  .pipe-vis{flex-direction:column;align-items:stretch}
+  .pipe-arrow{transform:rotate(90deg);text-align:center;padding:4px 0}
+}
+</style>
+</head>
+<body>
+
+<!-- 导航 -->
+<nav class="nav">
+  <div class="nav-brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m-9-11h4m14 0h4m-3.3-6.7-2.8 2.8m-9.8 9.8-2.8 2.8m0-15.4 2.8 2.8m9.8 9.8 2.8 2.8"/></svg>
+    本地AI工具箱<span>v0.1</span>
+  </div>
+  <div class="nav-tabs">
+    <button class="active" onclick="switchTab('asr',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+      语音识别
+    </button>
+    <button onclick="switchTab('translate',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+      翻译
+    </button>
+    <button onclick="switchTab('ocr',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+      文字识别
+    </button>
+    <button onclick="switchTab('tts',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+      语音合成
+    </button>
+    <button onclick="switchTab('nlp',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      文本AI
+    </button>
+    <button onclick="switchTab('pipeline',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+      管线
+    </button>
+    <button onclick="switchTab('models',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      模型管理
+    </button>
+  </div>
+</nav>
+
+<!-- 状态栏 -->
+<div class="status-bar" id="statusBar">
+  <span style="color:var(--muted);font-size:13px">加载中...</span>
+</div>
+
+<div class="main">
+
+<!-- ===================== ASR ===================== -->
+<div class="tab-content active" id="tab-asr">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+      语音识别
+    </div>
+    <div class="card-desc">录音、上传音频文件，自动识别语音内容转为文字</div>
+
+    <!-- 录音区 -->
+    <div class="field">
+      <div class="field-label">在线录音</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="rec-btn" onclick="toggleRecording()">
+          <svg id="rec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          <span id="rec-label">开始录音</span>
+        </button>
+        <span id="rec-timer" style="font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:60px"></span>
+        <span id="rec-status" style="font-size:12px"></span>
+      </div>
+      <div id="rec-preview" style="margin-top:10px;display:none">
+        <audio id="rec-audio" controls style="width:100%;border-radius:8px"></audio>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-sm btn-ghost" onclick="useRecording()">使用此录音识别</button>
+          <button class="btn btn-sm btn-ghost" onclick="discardRecording()">丢弃</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:var(--muted);font-size:12px;margin:8px 0">—— 或者 ——</div>
+
+    <div class="field">
+      <div class="field-label">上传音频文件</div>
+      <div class="upload-zone" id="asr-upload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <p>点击或拖拽上传音频文件</p>
+        <p style="font-size:11px;margin-top:4px">支持 WAV / MP3 / FLAC / OGG</p>
+        <input type="file" id="asr-file" accept="audio/*" onchange="handleFileUpload('asr',this)">
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">或输入文本（测试用）</div>
+      <textarea id="asr-input" placeholder="留空则使用录音或上传文件，填写则直接使用此文本作为输入"></textarea>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <div class="field-label">模型</div>
+        <select id="asr-model">
+          <option value="whisper">whisper.cpp</option>
+          <option value="funasr">Fun-ASR (达摩院)</option>
+          <option value="moonshine">Moonshine (轻量)</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="field-label">语言</div>
+        <select id="asr-lang">
+          <option value="">自动检测</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="asr-btn" onclick="runInfer('asr')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      开始识别
+    </button>
+
+    <div class="result-area" id="asr-result-area">
+      <div class="result-header">
+        <span class="result-badge" id="asr-badge"></span>
+        <div class="result-meta">
+          <span id="asr-meta-model"></span>
+          <span id="asr-meta-latency"></span>
+        </div>
+      </div>
+      <div class="result-body" id="asr-output"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 翻译 ===================== -->
+<div class="tab-content" id="tab-translate">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+      翻译
+    </div>
+    <div class="card-desc">离线翻译，支持多语言互译，无需联网</div>
+
+    <div class="field">
+      <div class="field-label">输入文本</div>
+      <textarea id="translate-input" placeholder="输入要翻译的文本内容"></textarea>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <div class="field-label">源语言</div>
+        <select id="translate-source">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="fr">Français</option>
+          <option value="de">Deutsch</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;padding-bottom:14px">
+        <button class="btn btn-sm btn-ghost" onclick="swapLangs()" title="交换语言">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        </button>
+      </div>
+      <div class="field">
+        <div class="field-label">目标语言</div>
+        <select id="translate-target">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="fr">Français</option>
+          <option value="de">Deutsch</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="field-label">模型</div>
+        <select id="translate-model">
+          <option value="mtran">MTranServer</option>
+          <option value="argos">Argos Translate</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="translate-btn" onclick="runInfer('translate')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      翻译
+    </button>
+
+    <div class="result-area" id="translate-result-area">
+      <div class="result-header">
+        <span class="result-badge" id="translate-badge"></span>
+        <div class="result-meta">
+          <span id="translate-meta-model"></span>
+          <span id="translate-meta-latency"></span>
+        </div>
+      </div>
+      <div class="result-body" id="translate-output" style="font-size:17px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== OCR ===================== -->
+<div class="tab-content" id="tab-ocr">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+      文字识别
+    </div>
+    <div class="card-desc">上传图片，自动识别其中的文字内容</div>
+
+    <div class="field">
+      <div class="field-label">图片文件</div>
+      <div class="upload-zone" id="ocr-upload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <p>点击或拖拽上传图片</p>
+        <p style="font-size:11px;margin-top:4px">支持 PNG / JPG / BMP / WebP</p>
+        <input type="file" id="ocr-file" accept="image/*" onchange="handleFileUpload('ocr',this)">
+      </div>
+      <img id="ocr-preview" class="preview-img hidden" alt="preview">
+    </div>
+
+    <div class="field">
+      <div class="field-label">或输入文本（Mock 测试）</div>
+      <textarea id="ocr-input" placeholder="留空则使用上传图片，填写则直接使用此文本作为输入"></textarea>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <div class="field-label">模型</div>
+        <select id="ocr-model">
+          <option value="ppocr">PPOCR-tiny (飞桨)</option>
+          <option value="tesseract">Tesseract</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="ocr-btn" onclick="runInfer('ocr')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      开始识别
+    </button>
+
+    <div class="result-area" id="ocr-result-area">
+      <div class="result-header">
+        <span class="result-badge" id="ocr-badge"></span>
+        <div class="result-meta">
+          <span id="ocr-meta-model"></span>
+          <span id="ocr-meta-latency"></span>
+        </div>
+      </div>
+      <div class="result-body" id="ocr-output"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== TTS ===================== -->
+<div class="tab-content" id="tab-tts">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+      语音合成
+    </div>
+    <div class="card-desc">输入文字，生成对应语音</div>
+
+    <div class="field">
+      <div class="field-label">输入文本</div>
+      <textarea id="tts-input" placeholder="输入要合成为语音的文字内容" style="min-height:120px"></textarea>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <div class="field-label">模型</div>
+        <select id="tts-model">
+          <option value="piper">Piper</option>
+          <option value="outetts">OuteTTS-0.6B</option>
+          <option value="openaudio">OpenAudio S1-Mini</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="tts-btn" onclick="runInfer('tts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+      合成语音
+    </button>
+
+    <div class="result-area" id="tts-result-area">
+      <div class="result-header">
+        <span class="result-badge" id="tts-badge"></span>
+        <div class="result-meta">
+          <span id="tts-meta-model"></span>
+          <span id="tts-meta-latency"></span>
+          <span id="tts-meta-format"></span>
+        </div>
+      </div>
+      <div class="result-body" id="tts-output">
+        <audio id="tts-audio" controls></audio>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== NLP ===================== -->
+<div class="tab-content" id="tab-nlp">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      文本 AI
+    </div>
+    <div class="card-desc">对话、摘要、分类 — 本地运行的小型语言模型</div>
+
+    <div class="field">
+      <div class="field-label">输入文本</div>
+      <textarea id="nlp-input" placeholder="输入文本内容，如一段文章、一个问题、一段对话..." style="min-height:140px"></textarea>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <div class="field-label">模型</div>
+        <select id="nlp-model">
+          <option value="qwen">Qwen2.5-0.5B</option>
+          <option value="smollm2">SmolLM2</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="field-label">任务类型</div>
+        <select id="nlp-task">
+          <option value="chat">对话问答</option>
+          <option value="summarize">文本摘要</option>
+          <option value="classify">文本分类</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="nlp-btn" onclick="runInfer('nlp')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      开始推理
+    </button>
+
+    <div class="result-area" id="nlp-result-area">
+      <div class="result-header">
+        <span class="result-badge" id="nlp-badge"></span>
+        <div class="result-meta">
+          <span id="nlp-meta-model"></span>
+          <span id="nlp-meta-latency"></span>
+          <span id="nlp-meta-task"></span>
+        </div>
+      </div>
+      <div class="result-body" id="nlp-output" style="font-size:15px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 管线 ===================== -->
+<div class="tab-content" id="tab-pipeline">
+
+  <!-- 预置管线 -->
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+      预置管线
+    </div>
+    <div class="card-desc">一键运行多步骤 AI 处理流程</div>
+
+    <div class="row">
+      <div class="field">
+        <div class="field-label">选择管线</div>
+        <select id="preset-pipeline" onchange="updatePipelineDesc()">
+          <option value="voice">语音管线</option>
+          <option value="document">文档管线</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="pipeline-desc" style="margin:12px 0;padding:12px 16px;background:var(--bg);border-radius:8px;font-size:13px;color:var(--muted)"></div>
+
+    <div class="pipe-vis" id="preset-pipe-vis"></div>
+
+    <div class="field">
+      <div class="field-label">输入数据</div>
+      <div class="upload-zone" id="pipeline-upload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <p>点击上传文件，或在下方输入文本</p>
+        <input type="file" id="pipeline-file" onchange="handleFileUpload('pipeline',this)">
+      </div>
+    </div>
+    <div class="field">
+      <textarea id="pipeline-input" placeholder="输入数据，或留空使用上传文件"></textarea>
+    </div>
+
+    <button class="btn btn-primary" onclick="runPipeline()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      执行管线
+    </button>
+
+    <div class="result-area" id="pipeline-result-area"></div>
+  </div>
+
+  <!-- 自定义管线 -->
+  <div class="card">
+    <div class="card-title">自定义管线</div>
+    <div class="card-desc">自由组合多个 AI 步骤，串联执行</div>
+
+    <div class="field">
+      <div class="field-label">输入数据</div>
+      <textarea id="custom-input" placeholder="输入文本或 base64 编码数据"></textarea>
+    </div>
+
+    <div class="field">
+      <div class="field-label">处理步骤</div>
+      <div class="builder-steps" id="builder-steps"></div>
+      <button class="btn btn-sm btn-ghost" style="margin-top:10px" onclick="addBuilderStep()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        添加步骤
+      </button>
+    </div>
+
+    <button class="btn btn-primary" onclick="runCustomPipeline()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      执行自定义管线
+    </button>
+
+    <div class="result-area" id="custom-result-area"></div>
+  </div>
+</div>
+
+<!-- ===================== 模型管理 ===================== -->
+<div class="tab-content" id="tab-models">
+  <div class="card">
+    <div class="card-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      模型管理
+    </div>
+    <div class="card-desc">管理和下载 12 个本地 AI 模型，下载完成后即可使用真实推理</div>
+
+    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="downloadAllModels()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        一键下载全部可用模型
+      </button>
+      <button class="btn btn-ghost" onclick="loadModels()">刷新状态</button>
+    </div>
+
+    <div id="models-list"></div>
+  </div>
+</div>
+
+</div>
+
+<!-- 底部 -->
+<div class="footer">
+  本地AI工具箱 v0.1.0 &middot; 12个模型 &middot; 5类服务 &middot; 来源：公众号「名侦探科男」
+  <span class="mode-badge" id="mode-tag">...</span>
+</div>
+
+<script>
+const BASE = '';
+
+// ===== 录音功能 =====
+let mediaRecorder = null;
+let audioChunks = [];
+let recTimerInterval = null;
+let recStartTime = 0;
+let recordedB64 = null;
+
+async function toggleRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  } else {
+    await startRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: getSupportedMime() });
+    audioChunks = [];
+    recordedB64 = null;
+
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+      const url = URL.createObjectURL(blob);
+      const audio = document.getElementById('rec-audio');
+      audio.src = url;
+      document.getElementById('rec-preview').style.display = 'block';
+      // 转 base64
+      const reader = new FileReader();
+      reader.onload = () => { recordedB64 = reader.result.split(',')[1]; };
+      reader.readAsDataURL(blob);
+    };
+
+    mediaRecorder.start();
+    // UI
+    const btn = document.getElementById('rec-btn');
+    btn.classList.add('btn-recording');
+    document.getElementById('rec-label').textContent = '停止录音';
+    document.getElementById('rec-status').innerHTML = '<span style="color:var(--accent)">● 录音中</span>';
+    document.getElementById('rec-preview').style.display = 'none';
+    // 计时
+    recStartTime = Date.now();
+    recTimerInterval = setInterval(() => {
+      const s = Math.floor((Date.now() - recStartTime) / 1000);
+      const m = Math.floor(s / 60);
+      document.getElementById('rec-timer').textContent = String(m).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+    }, 200);
+  } catch(e) {
+    alert('无法访问麦克风: ' + e.message);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+  clearInterval(recTimerInterval);
+  const btn = document.getElementById('rec-btn');
+  btn.classList.remove('btn-recording');
+  document.getElementById('rec-label').textContent = '重新录音';
+  document.getElementById('rec-status').innerHTML = '<span style="color:var(--green)">录音完成</span>';
+}
+
+function useRecording() {
+  if (recordedB64) {
+    uploadedFiles['asr'] = recordedB64;
+    // 清空文本输入
+    document.getElementById('asr-input').value = '';
+    // 清空文件上传
+    const fileInput = document.getElementById('asr-file');
+    fileInput.value = '';
+    const zone = document.getElementById('asr-upload');
+    zone.classList.remove('has-file');
+    const nameEl = zone.querySelector('.file-name');
+    if (nameEl) nameEl.remove();
+    // 自动执行识别
+    runInfer('asr');
+  }
+}
+
+function discardRecording() {
+  recordedB64 = null;
+  document.getElementById('rec-preview').style.display = 'none';
+  document.getElementById('rec-timer').textContent = '';
+  document.getElementById('rec-status').innerHTML = '';
+  document.getElementById('rec-label').textContent = '开始录音';
+}
+
+function getSupportedMime() {
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg', 'audio/wav'];
+  for (const t of types) { if (MediaRecorder.isTypeSupported(t)) return t; }
+  return 'audio/webm';
+}
+
+// ===== 文件上传处理 =====
+const uploadedFiles = {};
+
+function handleFileUpload(service, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const zone = input.closest('.upload-zone');
+  zone.classList.add('has-file');
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const b64 = reader.result.split(',')[1];
+    uploadedFiles[service] = b64;
+
+    // 显示文件名
+    let nameEl = zone.querySelector('.file-name');
+    if (!nameEl) { nameEl = document.createElement('div'); nameEl.className = 'file-name'; zone.appendChild(nameEl); }
+    nameEl.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+
+    // 图片预览
+    if (service === 'ocr') {
+      const preview = document.getElementById('ocr-preview');
+      preview.src = reader.result;
+      preview.classList.remove('hidden');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// ===== 标签切换 =====
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-tabs button').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+  // 初始化管线可视化
+  if (name === 'pipeline') {
+    updatePipelineDesc();
+    if (document.getElementById('builder-steps').children.length === 0) addBuilderStep();
+  }
+}
+
+// ===== 交换语言 =====
+function swapLangs() {
+  const s = document.getElementById('translate-source');
+  const t = document.getElementById('translate-target');
+  const tmp = s.value; s.value = t.value; t.value = tmp;
+}
+
+// ===== 加载服务状态 =====
+async function loadStatus() {
+  try {
+    const resp = await fetch(BASE + '/status');
+    const data = await resp.json();
+    const bar = document.getElementById('statusBar');
+    bar.innerHTML = '';
+    let allMock = true;
+    const labels = {asr:'语音识别',translate:'翻译',ocr:'文字识别',tts:'语音合成',nlp:'文本AI'};
+    for (const [name, info] of Object.entries(data)) {
+      const isMock = info.mock;
+      if (!isMock) allMock = false;
+      // 检查子模型权重就绪情况
+      let subModels = '';
+      if (info.models) {
+        const ready = Object.entries(info.models).filter(([k,v]) => v.weight_ready).map(([k]) => k);
+        const notReady = Object.entries(info.models).filter(([k,v]) => !v.weight_ready).map(([k]) => k);
+        if (ready.length > 0) subModels = `<span style="color:var(--green);font-size:10px;margin-left:2px">${ready.join(',')}</span>`;
+        if (notReady.length > 0) subModels += `<span style="color:var(--muted);font-size:10px;margin-left:2px">${notReady.join(',')}✗</span>`;
+      }
+      bar.innerHTML += `<div class="status-item"><div class="status-dot ${isMock?'mock':'ok'}"></div><span class="status-label">${labels[name]||name}</span>${subModels}</div>`;
+    }
+    const tag = document.getElementById('mode-tag');
+    tag.textContent = allMock ? '模拟模式' : '真实服务';
+    tag.className = 'mode-badge ' + (allMock ? 'mock-mode' : 'real-mode');
+  } catch(e) {
+    document.getElementById('statusBar').innerHTML = '<span style="color:var(--accent);font-size:13px">状态加载失败</span>';
+  }
+}
+
+// ===== 通用推理 =====
+async function runInfer(service) {
+  const inputEl = document.getElementById(service + '-input');
+  const resultArea = document.getElementById(service + '-result-area');
+  const btn = document.getElementById(service + '-btn');
+  const modelEl = document.getElementById(service + '-model');
+
+  // 获取输入：优先文本输入，其次上传文件
+  let input = inputEl ? inputEl.value.trim() : '';
+  if (!input && uploadedFiles[service]) input = uploadedFiles[service];
+  if (!input) { alert('请输入内容或上传文件'); return; }
+
+  const model = modelEl.value;
+  const params = {};
+
+  if (service === 'translate') {
+    params.source = document.getElementById('translate-source').value;
+    params.target = document.getElementById('translate-target').value;
+  }
+  if (service === 'nlp') {
+    params.task = document.getElementById('nlp-task').value;
+  }
+  if (service === 'asr') {
+    const lang = document.getElementById('asr-lang').value;
+    if (lang) params.language = lang;
+  }
+
+  btn.disabled = true;
+  btn.dataset.origHtml = btn.innerHTML;
+  btn.innerHTML = '<div class="spinner"></div> 处理中...';
+
+  resultArea.classList.add('visible');
+  const outEl = document.getElementById(service + '-output');
+  if (service === 'tts') {
+    outEl.innerHTML = '<div class="loading-text"><div class="spinner"></div> 正在合成语音...</div>';
+  } else {
+    outEl.innerHTML = '<div class="loading-text"><div class="spinner"></div> 正在处理...</div>';
+  }
+
+  try {
+    const resp = await fetch(BASE + '/' + service, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, model, params: Object.keys(params).length ? params : undefined })
+    });
+    const data = await resp.json();
+    showResult(service, data);
+  } catch(e) {
+    outEl.innerHTML = '<span style="color:var(--accent)">请求失败: ' + e.message + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = btn.dataset.origHtml;
+  }
+}
+
+function showResult(service, data) {
+  const area = document.getElementById(service + '-result-area');
+  const outEl = document.getElementById(service + '-output');
+  const badge = document.getElementById(service + '-badge');
+  const metaModel = document.getElementById(service + '-meta-model');
+  const metaLatency = document.getElementById(service + '-meta-latency');
+
+  area.classList.add('visible');
+
+  if (data.error) {
+    badge.className = 'result-badge'; badge.style.background = 'rgba(233,69,96,0.15)'; badge.style.color = 'var(--accent)'; badge.textContent = '错误';
+    metaModel.textContent = ''; metaLatency.textContent = '';
+    outEl.innerHTML = '<span style="color:var(--accent)">' + data.error + '</span>';
+    return;
+  }
+
+  badge.className = 'result-badge ' + (data.mock ? 'badge-mock' : 'badge-real');
+  badge.textContent = data.mock ? '模拟' : '真实';
+  badge.style.background = ''; badge.style.color = '';
+  metaModel.innerHTML = '模型: <b>' + (data.model || '-') + '</b>';
+  metaLatency.innerHTML = '耗时: <b>' + (data.latency_ms || '-') + 'ms</b>';
+
+  if (service === 'tts') {
+    const metaFormat = document.getElementById('tts-meta-format');
+    if (metaFormat) metaFormat.innerHTML = '格式: <b>' + (data.format || 'wav') + '</b>';
+    const audio = document.getElementById('tts-audio');
+    if (data.output && !data.mock) {
+      const mime = data.format === 'mp3' ? 'audio/mpeg' : 'audio/wav';
+      audio.src = 'data:' + mime + ';base64,' + data.output;
+    } else {
+      // mock: 生成一段静音
+      audio.src = 'data:audio/wav;base64,' + (data.output || 'UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+    }
+    outEl.innerHTML = '';
+    outEl.appendChild(audio);
+    if (data.mock) {
+      const note = document.createElement('div');
+      note.style.cssText = 'margin-top:8px;font-size:12px;color:var(--yellow)';
+      note.textContent = 'Mock 模式下播放静音音频';
+      outEl.appendChild(note);
+    }
+  } else {
+    outEl.textContent = data.output || '(无输出)';
+  }
+}
+
+// ===== 管线可视化 =====
+const PIPELINE_CONFIGS = {
+  voice: {
+    desc: '上传一段音频，自动完成：语音转文字 → AI 理解处理 → 翻译 → 语音合成输出',
+    steps: [
+      {icon:'\u{1F399}', name:'语音识别', model:'whisper'},
+      {icon:'\u{1F916}', name:'文本AI', model:'qwen'},
+      {icon:'\u{1F310}', name:'翻译', model:'mtran'},
+      {icon:'\u{1F50A}', name:'语音合成', model:'piper'},
+    ]
+  },
+  document: {
+    desc: '上传一张图片，自动完成：图片文字识别 → AI 摘要/分类',
+    steps: [
+      {icon:'\u{1F4F7}', name:'文字识别', model:'ppocr'},
+      {icon:'\u{1F916}', name:'文本AI', model:'qwen'},
+    ]
+  }
+};
+
+function updatePipelineDesc() {
+  const type = document.getElementById('preset-pipeline').value;
+  const cfg = PIPELINE_CONFIGS[type];
+  document.getElementById('pipeline-desc').textContent = cfg.desc;
+  renderPipeVis(cfg.steps);
+}
+
+function renderPipeVis(steps) {
+  const el = document.getElementById('preset-pipe-vis');
+  el.innerHTML = '';
+  steps.forEach((s, i) => {
+    if (i > 0) el.innerHTML += '<span class="pipe-arrow">➡️</span>';
+    el.innerHTML += `<div class="pipe-step" id="pstep-${i}"><span class="step-icon">${s.icon}</span><span class="step-name">${s.name}</span><span class="step-model">${s.model}</span><span class="step-time"></span></div>`;
+  });
+}
+
+// ===== 执行预置管线 =====
+async function runPipeline() {
+  const pipeline = document.getElementById('preset-pipeline').value;
+  let input = document.getElementById('pipeline-input').value.trim();
+  if (!input && uploadedFiles['pipeline']) input = uploadedFiles['pipeline'];
+  if (!input) { alert('请输入数据或上传文件'); return; }
+
+  const cfg = PIPELINE_CONFIGS[pipeline];
+  const steps = document.querySelectorAll('#preset-pipe-vis .pipe-step');
+  steps.forEach(s => { s.classList.remove('done','running','error'); s.querySelector('.step-time').textContent = ''; });
+
+  const resultArea = document.getElementById('pipeline-result-area');
+  resultArea.classList.add('visible');
+  resultArea.innerHTML = '<div class="loading-text" style="padding:20px"><div class="spinner"></div> 管线执行中...</div>';
+
+  // 逐步动画
+  for (let i = 0; i < steps.length; i++) {
+    steps[i].classList.add('running');
+  }
+
+  try {
+    const resp = await fetch(BASE + '/pipeline/' + pipeline, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input })
+    });
+    const data = await resp.json();
+
+    // 更新步骤状态
+    if (data.steps) {
+      data.steps.forEach((s, i) => {
+        if (steps[i]) {
+          steps[i].classList.remove('running');
+          steps[i].classList.add(s.result?.error ? 'error' : 'done');
+          steps[i].querySelector('.step-time').textContent = (s.result?.latency_ms || '?') + 'ms';
+        }
+      });
+    }
+
+    showPipelineResult(resultArea, data);
+  } catch(e) {
+    steps.forEach(s => { s.classList.remove('running'); s.classList.add('error'); });
+    resultArea.innerHTML = '<div style="color:var(--accent);padding:20px">请求失败: ' + e.message + '</div>';
+  }
+}
+
+// ===== 自定义管线构建器 =====
+function addBuilderStep() {
+  const container = document.getElementById('builder-steps');
+  const idx = container.children.length + 1;
+  const row = document.createElement('div');
+  row.className = 'builder-step';
+  row.innerHTML = `
+    <span class="step-num">${idx}</span>
+    <select class="builder-svc">
+      <option value="asr:whisper">语音识别 (whisper)</option>
+      <option value="asr:funasr">语音识别 (funasr)</option>
+      <option value="translate:mtran">翻译 (mtran)</option>
+      <option value="translate:argos">翻译 (argos)</option>
+      <option value="ocr:ppocr">文字识别 (ppocr)</option>
+      <option value="ocr:tesseract">文字识别 (tesseract)</option>
+      <option value="tts:piper">语音合成 (piper)</option>
+      <option value="tts:outetts">语音合成 (outetts)</option>
+      <option value="nlp:qwen">文本AI (qwen)</option>
+      <option value="nlp:smollm2">文本AI (smollm2)</option>
+    </select>
+    <button class="btn btn-sm btn-ghost" onclick="removeBuilderStep(this)" style="padding:4px 10px">✕</button>
+  `;
+  container.appendChild(row);
+}
+
+function removeBuilderStep(btn) {
+  const container = document.getElementById('builder-steps');
+  if (container.children.length > 1) {
+    btn.closest('.builder-step').remove();
+    // 重新编号
+    Array.from(container.children).forEach((row, i) => {
+      row.querySelector('.step-num').textContent = i + 1;
+    });
+  }
+}
+
+async function runCustomPipeline() {
+  let input = document.getElementById('custom-input').value.trim();
+  if (!input) { alert('请输入数据'); return; }
+
+  const steps = Array.from(document.querySelectorAll('.builder-svc')).map(el => el.value);
+  if (steps.length === 0) { alert('请添加至少一个步骤'); return; }
+
+  const resultArea = document.getElementById('custom-result-area');
+  resultArea.classList.add('visible');
+  resultArea.innerHTML = '<div class="loading-text" style="padding:20px"><div class="spinner"></div> 自定义管线执行中...</div>';
+
+  try {
+    const resp = await fetch(BASE + '/pipeline/custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, steps })
+    });
+    const data = await resp.json();
+    showPipelineResult(resultArea, data);
+  } catch(e) {
+    resultArea.innerHTML = '<div style="color:var(--accent);padding:20px">请求失败: ' + e.message + '</div>';
+  }
+}
+
+// ===== 管线结果展示 =====
+function showPipelineResult(el, data) {
+  if (data.error) {
+    el.innerHTML = `<div style="padding:20px"><span class="result-badge" style="background:rgba(233,69,96,0.15);color:var(--accent)">错误</span><div style="margin-top:12px;color:var(--accent)">${data.error}</div></div>`;
+    return;
+  }
+
+  const isMock = data.steps?.[0]?.result?.mock;
+  let html = '<div style="padding:20px">';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">';
+  html += `<span class="result-badge ${isMock?'badge-mock':'badge-real'}">${isMock?'模拟':'真实'}</span>`;
+  html += `<span style="font-size:13px;color:var(--muted)">管线: <b style="color:var(--text)">${data.pipeline === 'voice' ? '语音管线' : data.pipeline === 'document' ? '文档管线' : data.pipeline}</b></span>`;
+  html += `<span style="font-size:13px;color:var(--muted)">总耗时: <b style="color:var(--text)">${data.total_latency_ms}ms</b></span>`;
+  html += '</div>';
+
+  // 步骤详情
+  if (data.steps) {
+    html += '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">';
+    data.steps.forEach((step, i) => {
+      const output = step.result?.output || '-';
+      const truncated = output.length > 300 ? output.substring(0, 300) + '...' : output;
+      const latency = step.result?.latency_ms || '?';
+      const hasError = step.result?.error;
+      html += `<div style="background:var(--bg);border-radius:8px;padding:12px 16px;border-left:3px solid ${hasError?'var(--accent)':'var(--green)'}">`;
+      html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">`;
+      const stepLabels = {asr:'语音识别',nlp:'文本AI',translate:'翻译',tts:'语音合成',ocr:'文字识别'};
+      html += `<span style="font-size:12px;font-weight:700;color:var(--accent)">${i+1}. ${stepLabels[step.step]||step.step}</span>`;
+      html += `<span style="font-size:11px;color:var(--muted)">${step.model}</span>`;
+      html += `<span style="font-size:11px;color:var(--muted);margin-left:auto">${latency}ms</span>`;
+      html += '</div>';
+      html += `<div style="font-size:13px;color:var(--text);word-break:break-all;line-height:1.5">${hasError ? '<span style="color:var(--accent)">'+step.result.error+'</span>' : truncated}</div>`;
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // 最终输出
+  html += '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:14px">';
+  html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:600">最终输出</div>';
+  const final = data.final_output || '-';
+  if (data.format === 'wav' || data.format === 'mp3') {
+    const mime = data.format === 'mp3' ? 'audio/mpeg' : 'audio/wav';
+    html += `<audio controls style="width:100%;border-radius:8px" src="data:${mime};base64,${final}"></audio>`;
+  } else {
+    html += `<div style="background:var(--bg);padding:16px;border-radius:8px;font-size:15px;line-height:1.7">${final}</div>`;
+  }
+  html += '</div></div>';
+
+  el.innerHTML = html;
+}
+
+// ===== 模型管理 =====
+const categoryLabels = {asr:'语音识别',translate:'翻译',ocr:'文字识别',tts:'语音合成',nlp:'文本AI'};
+let modelPollTimer = null;
+
+async function loadModels() {
+  const el = document.getElementById('models-list');
+  el.innerHTML = '<div class="loading-text" style="padding:20px"><div class="spinner"></div> 加载模型列表...</div>';
+  try {
+    const resp = await fetch(BASE + '/models');
+    const data = await resp.json();
+    renderModels(data.models);
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--accent);padding:20px">加载失败: ' + e.message + '</div>';
+  }
+}
+
+function renderModels(models) {
+  const el = document.getElementById('models-list');
+  // 按类别分组
+  const groups = {};
+  models.forEach(m => {
+    if (!groups[m.category]) groups[m.category] = [];
+    groups[m.category].push(m);
+  });
+
+  let html = '';
+  for (const [cat, items] of Object.entries(groups)) {
+    html += '<div style="margin-bottom:20px">';
+    html += `<div style="font-size:14px;font-weight:700;color:var(--accent);margin-bottom:10px">${categoryLabels[cat]||cat}</div>`;
+    html += '<div style="display:flex;flex-direction:column;gap:8px">';
+
+    items.forEach(m => {
+      const statusColor = m.downloaded ? 'var(--green)' : (m.progress?.status === 'downloading' ? 'var(--blue)' : 'var(--muted)');
+      const statusText = m.downloaded ? '已就绪' : (m.progress?.status === 'downloading' ? '下载中' : m.progress?.status === 'error' ? '下载失败' : '未下载');
+      const canDownload = !m.downloaded && m.has_url && m.progress?.status !== 'downloading';
+
+      html += `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid ${m.downloaded?'rgba(78,204,163,0.2)':'rgba(255,255,255,0.06)'}">`;
+      // 状态指示
+      html += `<div style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;${m.downloaded?'box-shadow:0 0 6px var(--green)':''}"></div>`;
+      // 信息
+      html += '<div style="flex:1;min-width:0">';
+      html += `<div style="font-size:14px;font-weight:600">${m.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${m.desc}</span></div>`;
+      // 进度条
+      if (m.progress?.status === 'downloading') {
+        const pct = m.progress.progress_pct || 0;
+        html += `<div style="margin-top:6px;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden">`;
+        html += `<div style="height:100%;width:${pct}%;background:var(--blue);border-radius:2px;transition:width .3s"></div>`;
+        html += '</div>';
+        html += `<div style="font-size:11px;color:var(--muted);margin-top:4px">${pct}% · ${m.progress.downloaded_mb||0} / ${m.progress.total_mb||m.size_mb} MB</div>`;
+      } else if (m.progress?.status === 'error') {
+        html += `<div style="font-size:11px;color:var(--accent);margin-top:4px">${m.progress.error||'下载出错'}</div>`;
+      }
+      html += '</div>';
+      // 大小
+      html += `<span style="font-size:12px;color:var(--muted);flex-shrink:0">${m.size_mb} MB</span>`;
+      // 状态/操作
+      html += '<div style="flex-shrink:0;min-width:80px;text-align:right">';
+      if (m.downloaded) {
+        html += '<span style="font-size:12px;color:var(--green);font-weight:600">已就绪</span>';
+      } else if (m.progress?.status === 'downloading') {
+        html += '<span style="font-size:12px;color:var(--blue)">下载中...</span>';
+      } else if (canDownload) {
+        html += `<button class="btn btn-sm btn-primary" onclick="downloadOneModel('${m.id}')" style="padding:4px 12px">下载</button>`;
+      } else if (!m.has_url) {
+        html += '<span style="font-size:11px;color:var(--muted)">需手动配置</span>';
+      }
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div></div>';
+  }
+
+  // 统计
+  const downloaded = models.filter(m => m.downloaded).length;
+  const downloadable = models.filter(m => !m.downloaded && m.has_url).length;
+  html = `<div style="margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;font-size:13px;color:var(--muted)">已就绪 <b style="color:var(--green)">${downloaded}</b> / ${models.length} 个模型 · 可下载 <b style="color:var(--blue)">${downloadable}</b> 个</div>` + html;
+
+  el.innerHTML = html;
+
+  // 如果有下载中的，启动轮询
+  const downloading = models.filter(m => m.progress?.status === 'downloading');
+  if (downloading.length > 0 && !modelPollTimer) {
+    modelPollTimer = setInterval(pollModels, 2000);
+  } else if (downloading.length === 0 && modelPollTimer) {
+    clearInterval(modelPollTimer);
+    modelPollTimer = null;
+  }
+}
+
+async function downloadOneModel(modelId) {
+  try {
+    await fetch(BASE + '/models/' + modelId + '/download', {method: 'POST'});
+    loadModels();
+  } catch(e) {
+    alert('下载失败: ' + e.message);
+  }
+}
+
+async function downloadAllModels() {
+  try {
+    const resp = await fetch(BASE + '/models');
+    const data = await resp.json();
+    const downloadable = data.models.filter(m => !m.downloaded && m.has_url && m.progress?.status !== 'downloading');
+    if (downloadable.length === 0) { alert('没有可下载的模型'); return; }
+    for (const m of downloadable) {
+      await fetch(BASE + '/models/' + m.id + '/download', {method: 'POST'});
+    }
+    loadModels();
+  } catch(e) {
+    alert('操作失败: ' + e.message);
+  }
+}
+
+async function pollModels() {
+  try {
+    const resp = await fetch(BASE + '/models');
+    const data = await resp.json();
+    renderModels(data.models);
+  } catch(e) {}
+}
+
+// ===== 初始化 =====
+loadStatus();
+updatePipelineDesc();
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>

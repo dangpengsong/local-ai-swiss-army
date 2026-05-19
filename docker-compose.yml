@@ -1,0 +1,93 @@
+services:
+  gateway:
+    build: ./gateway
+    container_name: la-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - ASR_URL=http://asr:8001
+      - TRANSLATE_URL=http://translate:8002
+      - OCR_URL=http://ocr:8003
+      - TTS_URL=http://tts:8004
+      - NLP_URL=http://nlp:8005
+      - MTRAN_URL=http://mtran:8989
+      - LOCAL_AI_MOCK=${LOCAL_AI_MOCK:-auto}
+    volumes:
+      - ./web:/app/web:ro
+      - ./models:/app/models
+    depends_on:
+      asr:
+        condition: service_started
+        required: false
+      translate:
+        condition: service_started
+        required: false
+      ocr:
+        condition: service_started
+        required: false
+      tts:
+        condition: service_started
+        required: false
+      nlp:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
+  asr:
+    build: ./services/asr
+    container_name: la-asr
+    profiles: ["full"]
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./models/asr:/models
+    restart: unless-stopped
+
+  translate:
+    build: ./services/translate
+    container_name: la-translate
+    profiles: ["full"]
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./models/translate:/models
+    restart: unless-stopped
+
+  ocr:
+    build: ./services/ocr
+    container_name: la-ocr
+    profiles: ["full"]
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./models/ocr:/models
+    restart: unless-stopped
+
+  tts:
+    build: ./services/tts
+    container_name: la-tts
+    profiles: ["full"]
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./models/tts:/models
+    restart: unless-stopped
+
+  nlp:
+    build: ./services/nlp
+    container_name: la-nlp
+    profiles: ["full"]
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./models/nlp:/models
+    restart: unless-stopped
+
+  # MTranServer 独立翻译服务
+  mtran:
+    image: xxnuo/mtranserver:latest
+    container_name: la-mtran
+    profiles: ["full"]
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
