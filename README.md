@@ -251,7 +251,7 @@ A: Qwen2.5-0.5B 约 500MB 内存，SmolLM2 约 1.2GB。可只下载需要的模�
 ## 关注公众号
 
 <p align="center">
-  <img src="assets/qrcode.png" width="200" alt="公众号二维码">
+  <img src="assets/qrcode.png" width="360" alt="公众号二维码">
 </p>
 
 <p align="center">关注「名侦探科男」，获取更多本地 AI 部署教程</p>
