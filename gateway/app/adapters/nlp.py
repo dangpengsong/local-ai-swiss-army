@@ -47,6 +47,12 @@ TEMPERATURE = 0.7
 # 不带工具的请求强制收尾，避免无限循环。
 MAX_TOOL_ROUNDS = 3
 
+# 生成空间小于这个数就不带工具。一次工具调用（函数名 + JSON 参数）至少要
+# 几十个 token，空间不够时模型会写出被截断的调用，而 llama.cpp 解析不了
+# 会**直接返回 500**（实测 max_tokens=20 时触发，报 "Failed to parse tool
+# call arguments as JSON"）。宁可这一步不调工具，也好过整个请求失败。
+TOOL_MIN_TOKENS = 128
+
 # 单轮请求的超时。工具循环把「一个请求一轮推理」变成最多四轮，每轮还要
 # prefill 上一轮的 tool 结果，默认超时不够用。
 ROUND_TIMEOUT = 300.0
@@ -196,7 +202,10 @@ class NLPAdapter(BaseServiceAdapter):
 
         for round_no in range(MAX_TOOL_ROUNDS + 1):
             # 最后一轮去掉 tools：模型不可能再要求调用，只能基于已有信息作答
-            tools = TOOL_SPECS if (tools_on and round_no < MAX_TOOL_ROUNDS) else None
+            budget = max_tokens or MAX_TOKENS
+            tools = TOOL_SPECS if (
+                tools_on and round_no < MAX_TOOL_ROUNDS and budget >= TOOL_MIN_TOKENS
+            ) else None
             result = None
             async for kind, payload in self._stream_round(
                     messages, tools, max_tokens, temperature):
