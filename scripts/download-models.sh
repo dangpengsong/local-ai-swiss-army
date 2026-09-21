@@ -59,7 +59,6 @@ download_asr() {
 
 download_translate() {
     echo "── 翻译模型 ──"
-    echo "  ℹ️  Argos: 语言包已内置在镜像里（构建时下载），无需在此处理"
     echo "  ⚠️  MTranServer: 使用独立 Docker 容器；翻译模型在首次翻译时自动下载到 models/mtran/"
     echo ""
 }

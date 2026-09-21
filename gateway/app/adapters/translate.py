@@ -1,41 +1,33 @@
-"""翻译适配器 — MTranServer / Argos Translate"""
+"""翻译适配器 — MTranServer（独立 Docker 容器）
+
+Argos Translate 已于 2026-09 移除：其 en→zh 训练语料混入字幕文件，会把 ASS 样式标签
+（形如 ``{\\fn华文楷体\\fs16\\1cHE0E0E0}``）当正文吐出来，simple 词条也大量错译。
+16 组样本对比中 MTranServer 每组都不劣于它，故删除而不是保留降级选项。
+"""
 
 import time
 
 import httpx
 import logging
 
-from .base import BaseServiceAdapter, MockMode, probe_health, OK_TTL, FAIL_TTL
+from .base import BaseServiceAdapter, MockMode
 from ..mock import mock_translate
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_MODELS = ["mtran", "argos"]
+SUPPORTED_MODELS = ["mtran"]
+
+# MTranServer 使用 zh-Hans/zh-Hant 而非 zh
+LANG_MAP = {"zh": "zh-Hans", "zh-CN": "zh-Hans", "zh-TW": "zh-Hant"}
 
 
 class TranslateAdapter(BaseServiceAdapter):
-    def __init__(self, service_url: str, mock_mode: str = "auto", mtran_url: str = ""):
-        super().__init__(service_url, "Translate", mock_mode)
-        self.mtran_url = mtran_url.rstrip("/") if mtran_url else ""
-        self._mtran_available: bool | None = None
-        self._mtran_checked_at: float = 0.0
+    """MTranServer 跑在独立容器里，接口是 /translate 而非基类约定的 /infer，
+    所以 service_url 直接指向该容器 —— 探测（/health）与调用都走它，
+    is_available / should_mock 无需覆写即可正确工作。"""
 
-    def mtran_available(self) -> bool:
-        """探测 MTranServer 独立容器（与 argos 的 service_url 无关，带 TTL 缓存）"""
-        now = time.time()
-        if self._mtran_available is not None:
-            ttl = OK_TTL if self._mtran_available else FAIL_TTL
-            if now - self._mtran_checked_at < ttl:
-                return self._mtran_available
-        self._mtran_available = probe_health(self.mtran_url)
-        if not self._mtran_available:
-            logger.info("[Translate] MTranServer 不可达，降级为 Mock")
-        self._mtran_checked_at = now
-        return self._mtran_available
-
-    def any_backend_available(self) -> bool:
-        """argos 服务或 MTranServer 任一可用即算可用（供 /status 展示）"""
-        return self.is_available() or (bool(self.mtran_url) and self.mtran_available())
+    def __init__(self, mtran_url: str, mock_mode: str = "auto"):
+        super().__init__(mtran_url, "Translate", mock_mode)
 
     async def infer(self, input_data: str, model: str = "mtran", params: dict = None) -> dict:
         params = params or {}
@@ -48,42 +40,30 @@ class TranslateAdapter(BaseServiceAdapter):
         if self.mock_mode == MockMode.ON:
             return mock_translate(model, source, target)
 
-        # mtran 走独立容器：可用性只看它自己，与 argos 服务（translate:8002）无关
-        if model == "mtran" and self.mtran_url:
-            if self.mock_mode == MockMode.AUTO and not self.mtran_available():
-                return mock_translate(model, source, target)
-            return await self._call_mtran(input_data, source, target)
-
         if self.mock_mode == MockMode.AUTO and not self.is_available():
             return mock_translate(model, source, target)
 
-        payload = {
-            "input": input_data,
-            "model": model,
-            "params": {"source": source, "target": target, **params},
-        }
-        return await self.call_service(payload)
+        return await self._call_mtran(input_data, source, target)
 
     async def _call_mtran(self, text: str, source: str, target: str) -> dict:
-        """直接调用 MTranServer 容器"""
-        import time
+        """直接调用 MTranServer 容器
+
+        超时给到 300 秒：某个语言对首次翻译时，服务端要先把该语言对的模型下载下来。
+        """
         start = time.time()
-        # MTranServer 使用 zh-Hans/zh-Hant 而非 zh
-        lang_map = {"zh": "zh-Hans", "zh-CN": "zh-Hans", "zh-TW": "zh-Hant"}
-        src = lang_map.get(source, source)
-        tgt = lang_map.get(target, target)
+        src = LANG_MAP.get(source, source)
+        tgt = LANG_MAP.get(target, target)
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
                 resp = await client.post(
-                    f"{self.mtran_url}/translate",
+                    f"{self.service_url}/translate",
                     json={"from": src, "to": tgt, "text": text, "html": False},
                     headers={"Content-Type": "application/json"},
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                translated = data.get("result", "")
                 return {
-                    "output": translated,
+                    "output": data.get("result", ""),
                     "model": "mtran",
                     "mock": False,
                     "latency_ms": int((time.time() - start) * 1000),

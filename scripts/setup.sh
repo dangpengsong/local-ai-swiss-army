@@ -24,7 +24,6 @@ echo ""
 
 # 1. 创建目录
 # mtran 也一并建好：它的模型在首次翻译时自动下载，目录先存在可避免 Docker 以 root 创建
-# （argos 的语言包在构建镜像时装好，不需要宿主机目录）
 echo "📁 创建目录..."
 mkdir -p models/{asr,tts,nlp,mtran}
 

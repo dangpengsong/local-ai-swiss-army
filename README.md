@@ -32,7 +32,6 @@
 | 语音识别 | Fun-ASR | funasr | ⚠️ 未实现（规划中，UI 已禁用） |
 | 语音识别 | Moonshine | moonshine | ⚠️ 未实现（规划中，UI 已禁用） |
 | 翻译 | MTranServer | 独立 Docker | 离线翻译（自带 `/imme`，可对接沉浸式翻译） |
-| 翻译 | Argos Translate | argostranslate | 开源离线 |
 | 语音合成 | Piper 小雅 | piper-tts | 默认中文语音（拼音方案） |
 | 语音合成 | Piper 华言 | piper-tts | 备选中文语音（espeak 方案，中英混读略好） |
 | 语音合成 | OuteTTS-0.6B | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
@@ -50,7 +49,7 @@
 ### 前置要求
 
 - Docker Desktop（或 Docker Engine + Docker Compose V2）
-- 15GB+ 可用磁盘空间：模型约 4.7GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 7GB + 构建缓存（NLP 服务的 llama-cpp-python 需现场编译）
+- 12GB+ 可用磁盘空间：模型约 4.7GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 4GB + 构建缓存约 2.8GB（NLP 服务的 llama-cpp-python 需现场编译）
 - macOS / Linux / Windows WSL2
 
 ### 联网要求
@@ -60,7 +59,6 @@
 | 阶段 | 拉取内容 | 失败后果 |
 |------|----------|----------|
 | 构建镜像 | PyPI 依赖（默认走清华源） | 构建失败 |
-| 构建镜像 | argos 语言包（argos-net.com，约 365MB） | 构建失败 —— 下载不全不会静默跳过，不会留下「能启动但翻译不了」的镜像 |
 | 下载模型 | HuggingFace 权重（脚本自动替换为 hf-mirror） | 模型不可用，模型页显示「可下载」 |
 | 首次翻译 | MTranServer 按语言对下载模型到 `models/mtran/` | 该语言对翻译失败 |
 
@@ -102,10 +100,6 @@ HF_MIRROR=https://huggingface.co ./scripts/download-models.sh all
 >
 > 命令行下载和面板下载走的是两套独立代码，只改一个不会影响另一个。
 
-> argos 语言包的源不在脚本里，而是写在 `services/translate/install_argos_packages.py` 的 `BASE_URL`（构建镜像时使用）。
-
-> 为什么要单独指定 CPU 版 torch？`argostranslate → stanza → torch` 这条链，若不指定会装 **GPU 版 torch**，连带 `nvidia-cudnn`（553MB）、`nvidia-cublas`（423MB）等 2GB+ 的 CUDA 包 —— 实测默认构建下载了 **2377MB**，而 CPU 版只需 196MB。本项目全部为 CPU 推理，这些 GPU 包毫无用处。
-
 ### 1. 克隆项目
 
 ```bash
@@ -135,12 +129,12 @@ docker compose up -d gateway
 
 访问 `http://localhost:8000`，所有服务返回模拟数据。
 
-> 模拟输出的文本统一带 `[模拟]` 前缀，前端同时显示黄色「模拟」徽章。这样即使只部署了部分服务（例如 mtran 已就绪、argos 未部署），也不会把模拟结果误认为真实翻译/识别结果。
+> 模拟输出的文本统一带 `[模拟]` 前缀，前端同时显示黄色「模拟」徽章。这样即使只部署了部分服务（例如只起了 nlp、mtran 容器没起），也不会把模拟结果误认为真实翻译/识别结果。
 
 **完整模式（下载模型 + 启动所有服务）：**
 
 ```bash
-# 下载可用模型（约 2.4GB；argos 语言包不在此列，它随镜像构建下载）
+# 下载可用模型（约 2.4GB）
 ./scripts/download-models.sh all
 
 # 构建并启动全部服务
@@ -243,12 +237,12 @@ curl -X POST http://localhost:8000/nlp \
 # 翻译
 curl -X POST http://localhost:8000/translate \
   -H "Content-Type: application/json" \
-  -d '{"input": "Hello World", "model": "argos", "params": {"source": "en", "target": "zh"}}'
+  -d '{"input": "Hello World", "model": "mtran", "params": {"source": "en", "target": "zh"}}'
 
 # 自定义管线
 curl -X POST http://localhost:8000/pipeline/custom \
   -H "Content-Type: application/json" \
-  -d '{"input": "Hello", "steps": ["translate:argos", "tts:piper"]}'
+  -d '{"input": "Hello", "steps": ["translate:mtran", "tts:piper"]}'
 ```
 
 ### 响应格式
@@ -296,7 +290,6 @@ data: {"done": true, "model": "qwen3", "latency_ms": 8600}
 |------|--------|------|
 | `LOCAL_AI_MOCK` | `auto` | `auto` 自动检测 / `1` 强制 Mock / `0` 强制真实 |
 | `ASR_URL` | `http://asr:8001` | ASR 服务地址 |
-| `TRANSLATE_URL` | `http://translate:8002` | 翻译服务地址 |
 | `TTS_URL` | `http://tts:8004` | TTS 服务地址 |
 | `NLP_URL` | `http://nlp:8005` | NLP 服务地址 |
 | `MTRAN_URL` | `http://mtran:8989` | MTranServer 独立翻译容器地址 |
@@ -341,9 +334,8 @@ local-ai-swiss-army/
 │       ├── mock.py             # Mock 输出生成器
 │       ├── adapters/           # 4 个模型适配器
 │       └── pipelines/          # 管线（语音/自定义）
-├── services/                   # 4 个模型服务
+├── services/                   # 3 个模型服务
 │   ├── asr/                    # 语音识别 (faster-whisper)
-│   ├── translate/              # 翻译 (argos-translate)
 │   ├── tts/                    # 语音合成 (piper)
 │   └── nlp/                    # 文本AI (llama-cpp-python)
 ├── web/
@@ -402,25 +394,9 @@ A: 三种状态含义不同，模型页用的是**文件是否到位**与**服�
 |------|------|------|
 | 🟢 已就绪 | 权重齐 + 服务在跑 | 正常 |
 | 🟡 已下载 · 服务未启动 | 权重在，但对应容器没起 | `docker compose --profile full up -d` |
-| 🟡 服务在跑 · 模型未就绪 | 由镜像内置的模型（mtran），服务在跑但自身缺资源 | 见下条 |
-| ⚪ 服务未启动 | 由镜像内置的模型（argos/mtran），容器没起 | `docker compose --profile full up -d` |
+| 🟡 服务在跑 · 模型未就绪 | 由独立容器提供的模型（mtran），服务在跑但自身缺资源 | 见下条 |
+| ⚪ 服务未启动 | 由独立容器提供的模型（mtran），容器没起 | `docker compose --profile full up -d` |
 | ⚪ 未实现 | 仅注册表占位，尚未实现 | 无需处理 |
-
-**Q: Argos 翻译报「未安装语言包 en->zh」？**
-A: 语言包（en↔zh、en↔ja 共 4 个，约 365MB）在**构建镜像时**装进 `/root/.local/share/argos-translate/packages` —— 容器一起来就能翻译，不依赖宿主机挂载，也没有启动时解压那一步。
-
-下载由 `services/translate/install_argos_packages.py` 负责：固定版本的直链 + 重试 10 次，**下载不全就让构建失败**，不会留下一个「能启动但翻译不了」的镜像。中途断网重跑 `docker compose build translate` 即可。
-
-报这个错通常说明镜像不是用当前代码构建的（比如沿用了旧镜像），重建即可：
-
-```bash
-docker compose build translate
-docker compose --profile full up -d --no-build translate
-```
-
-> 要增加语言对（例如 zh↔ja）：在 `install_argos_packages.py` 的 `PACKAGES` 里加一行 `("文件名", "说明")`，重建镜像。包名与版本号见 [argos-net.com/v1](https://argos-net.com/v1/)。
-
-未安装的语言对（如 `zh→ja`）会返回明确错误并列出已装语言对，不会静默失败。
 
 **Q: 怎样确认部署是完整的？**
 A: 打开 `http://localhost:8000` 的「模型管理」页，已实现且有对应服务的模型应显示 🟢 已就绪。或用命令行：

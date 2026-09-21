@@ -31,7 +31,7 @@ def _init_adapters():
     s = get_settings()
     return {
         "asr": ASRAdapter(s.asr_url, s.local_ai_mock),
-        "translate": TranslateAdapter(s.translate_url, s.local_ai_mock, mtran_url=s.mtran_url),
+        "translate": TranslateAdapter(s.mtran_url, s.local_ai_mock),
         "tts": TTSAdapter(s.tts_url, s.local_ai_mock),
         "nlp": NLPAdapter(s.nlp_url, s.local_ai_mock),
     }
@@ -89,16 +89,6 @@ MODEL_REGISTRY = {
         "builtin": True,
         "url": "",
         "size_mb": 300,
-    },
-    "argos": {
-        "name": "Argos Translate",
-        "category": "translate",
-        "desc": "开源离线翻译（语言包已内置在镜像中）",
-        "files": [],
-        "builtin": True,
-        "url": "",
-        # 4 个语言包（en↔zh、en↔ja）合计约 365MB，构建镜像时装好（解压后约占 423MB）
-        "size_mb": 365,
     },
     "piper": {
         "name": "Piper 小雅",
@@ -231,14 +221,13 @@ async def _probe_service_health(url: str) -> dict:
 def _model_service_urls(model_id: str) -> list[str]:
     """模型对应的服务地址
 
-    translate 类有两个独立容器：argos 在 translate 服务，mtran 在 mtran 容器。
+    translate 类只剩 mtran 一个容器（Argos 已移除）。
     """
     s = get_settings()
     return {
         "whisper": [s.asr_url],
         "funasr": [s.asr_url],
         "moonshine": [s.asr_url],
-        "argos": [s.translate_url],
         "mtran": [s.mtran_url],
         "piper": [s.tts_url],
         "piper_huayan": [s.tts_url],

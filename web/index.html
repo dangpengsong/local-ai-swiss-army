@@ -346,7 +346,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="field-label">模型</div>
         <select id="translate-model">
           <option value="mtran">MTranServer</option>
-          <option value="argos">Argos Translate</option>
         </select>
       </div>
     </div>
@@ -993,7 +992,6 @@ function addBuilderStep() {
       <option value="asr:whisper">语音识别 (whisper)</option>
       <option value="asr:funasr" disabled>语音识别 (funasr) — 未实现</option>
       <option value="translate:mtran">翻译 (mtran)</option>
-      <option value="translate:argos">翻译 (argos)</option>
       <option value="tts:piper">语音合成 (piper)</option>
       <option value="tts:outetts" disabled>语音合成 (outetts) — 未实现</option>
       <option value="nlp:qwen">文本AI (qwen)</option>
@@ -1165,7 +1163,7 @@ function renderModels(models) {
       } else if (canDownload) {
         html += `<button class="btn btn-sm btn-primary" onclick="downloadOneModel('${m.id}')" style="padding:4px 12px">下载</button>`;
       } else if (m.builtin) {
-        // builtin 模型没有下载概念。服务在跑却没就绪（如 argos 无语言包），
+        // builtin 模型没有下载概念。服务在跑却没就绪（如 piper 语音文件缺失），
         // 说明服务自身缺资源，不能笼统说成「服务未启动」
         html += m.service_running
           ? '<span style="font-size:11px;color:var(--yellow)">服务在跑 · 模型未就绪</span>'

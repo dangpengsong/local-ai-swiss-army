@@ -5,7 +5,6 @@ from functools import lru_cache
 class Settings(BaseSettings):
     local_ai_mock: str = "auto"
     asr_url: str = "http://asr:8001"
-    translate_url: str = "http://translate:8002"
     tts_url: str = "http://tts:8004"
     nlp_url: str = "http://nlp:8005"
     mtran_url: str = "http://mtran:8989"
@@ -13,7 +12,6 @@ class Settings(BaseSettings):
     hf_endpoint: str = "https://hf-mirror.com"
 
     asr_port: int = 8001
-    translate_port: int = 8002
     tts_port: int = 8004
     nlp_port: int = 8005
 

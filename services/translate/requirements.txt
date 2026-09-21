@@ -1,8 +1,0 @@
-# 版本锁定为实测可用的组合
-fastapi==0.141.1
-uvicorn==0.53.0
-argostranslate==1.11.0
-# argostranslate → stanza → torch。不指定的话 pip 会装 GPU 版 torch，
-# 连带 2GB+ 的 nvidia-* CUDA 包（本项目纯 CPU 推理，完全用不上）。
-# CPU 版只在 PyTorch 官方源提供，源地址见 Dockerfile 的 TORCH_CPU_INDEX_URL。
-torch==2.14.0+cpu

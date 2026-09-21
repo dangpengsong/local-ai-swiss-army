@@ -6,7 +6,6 @@ services:
       - "8000:8000"
     environment:
       - ASR_URL=http://asr:8001
-      - TRANSLATE_URL=http://translate:8002
       - TTS_URL=http://tts:8004
       - NLP_URL=http://nlp:8005
       - MTRAN_URL=http://mtran:8989
@@ -18,9 +17,6 @@ services:
       - ./models:/app/models
     depends_on:
       asr:
-        condition: service_started
-        required: false
-      translate:
         condition: service_started
         required: false
       tts:
@@ -39,16 +35,6 @@ services:
       - "8001:8001"
     volumes:
       - ./models/asr:/models
-    restart: unless-stopped
-
-  # argos 语言包在构建镜像时装进去（见 services/translate/Dockerfile），
-  # 因此不需要挂载卷，也没有语言包相关的环境变量
-  translate:
-    build: ./services/translate
-    container_name: la-translate
-    profiles: ["full"]
-    ports:
-      - "8002:8002"
     restart: unless-stopped
 
   tts:
