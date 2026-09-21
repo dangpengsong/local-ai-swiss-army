@@ -24,7 +24,7 @@
 └─────┘└─────┘└─────┘└─────┘
 ```
 
-## 11 个模型
+## 12 个模型
 
 | 类别 | 模型 | 引擎 | 备注 |
 |------|------|------|------|
@@ -37,7 +37,8 @@
 | 语音合成 | Piper 华言 | piper-tts | 备选中文语音（espeak 方案，中英混读略好） |
 | 语音合成 | OuteTTS-0.6B | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
 | 语音合成 | OpenAudio S1-Mini | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
-| 文本AI | Qwen2.5-0.5B | llama-cpp-python | 通义千问 |
+| 文本AI | **Qwen3-4B** | llama-cpp-python | 通义千问，推荐主力（中文强，纯 CPU 约 7 tok/s） |
+| 文本AI | Qwen2.5-0.5B | llama-cpp-python | 通义千问轻量版（约 43 tok/s，质量有限，适合快速试跑） |
 | 文本AI | SmolLM2 | llama-cpp-python | HuggingFace |
 
 > 标注「⚠️ 未实现」的 4 个模型仅在注册表中占位，选择后不会返回真实推理结果。
@@ -49,7 +50,7 @@
 ### 前置要求
 
 - Docker Desktop（或 Docker Engine + Docker Compose V2）
-- 12GB+ 可用磁盘空间：模型约 2.4GB + 镜像约 7GB + 构建缓存（NLP 服务的 llama-cpp-python 需现场编译）
+- 15GB+ 可用磁盘空间：模型约 4.7GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 7GB + 构建缓存（NLP 服务的 llama-cpp-python 需现场编译）
 - macOS / Linux / Windows WSL2
 
 ### 联网要求
@@ -273,6 +274,8 @@ curl -X POST http://localhost:8000/pipeline/custom \
 | `TTS_URL` | `http://tts:8004` | TTS 服务地址 |
 | `NLP_URL` | `http://nlp:8005` | NLP 服务地址 |
 | `MTRAN_URL` | `http://mtran:8989` | MTranServer 独立翻译容器地址 |
+| `NLP_N_THREADS` | 物理核心数 | NLP 推理线程数。**不要填逻辑核数**——超线程的两个线程会争抢同一物理核的执行单元，实测 i5-10400（6 核 12 线程）上 12 线程比 6 线程慢 **28 倍**（43 → 1.5 tok/s） |
+| `NLP_N_CTX` | `4096` | NLP 上下文长度。KV cache 约 144KB/token（Qwen3-4B，36 层 / 8 个 KV 头），4096 约占 590MB 内存 |
 
 ---
 
@@ -331,9 +334,13 @@ local-ai-swiss-army/
 
 ### 添加新模型
 
-1. 在对应 `services/<name>/server.py` 中添加推理逻辑
-2. 在 `gateway/app/adapters/` 对应适配器的 `SUPPORTED_MODELS` 中注册
-3. 在 `gateway/app/main.py` 的 `MODEL_REGISTRY` 中添加下载配置
+以下 5 处都要改。漏改的后果都是「静默不工作」而非报错，排查成本高：
+
+1. `services/<name>/server.py` —— 推理逻辑
+2. `gateway/app/adapters/` 对应适配器的 `SUPPORTED_MODELS` —— 漏掉则接口返回「不支持的模型」
+3. `gateway/app/main.py` 的 `MODEL_REGISTRY` —— 下载地址与就绪判定
+4. `gateway/app/main.py` 的 `_model_service_urls` —— 漏掉则模型页永远显示「服务未启动」
+5. `web/index.html` 的下拉框、`scripts/download-models.sh` —— 否则前端选不到、命令行下不到
 
 ### 添加新管线
 

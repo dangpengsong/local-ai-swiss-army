@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Local AI Swiss Army",
-    description="本地小模型全栈 Demo — 11 模型 / 4 类 / Mock 优先",
+    description="本地小模型全栈 Demo — 12 模型 / 4 类 / Mock 优先",
     version="0.1.0",
 )
 
@@ -149,6 +149,15 @@ MODEL_REGISTRY = {
         "size_mb": 500,
         "planned": True,
     },
+    "qwen3": {
+        "name": "Qwen3-4B",
+        "category": "nlp",
+        "desc": "通义千问 4B（中文强，纯 CPU 约 7 tok/s）",
+        "files": ["models/nlp/qwen3-4b-instruct-2507-q4_k_m.gguf"],
+        "url": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        # 实际 2497281120 字节（十进制 2497 MB）。前端直接把此值显示给用户，故用十进制
+        "size_mb": 2497,
+    },
     "smollm2": {
         "name": "SmolLM2",
         "category": "nlp",
@@ -237,6 +246,7 @@ def _model_service_urls(model_id: str) -> list[str]:
         "openaudio": [s.tts_url],
         "smollm2": [s.nlp_url],
         "qwen": [s.nlp_url],
+        "qwen3": [s.nlp_url],
     }.get(model_id, [])
 
 
@@ -317,6 +327,10 @@ async def list_models():
         elif cfg.get("builtin"):
             # 无文件可下载，是否就绪全看服务
             downloaded = _builtin_ready(mid, healths)
+        elif progress and progress.get("status") == "downloading":
+            # 下载中不能报「已下载」：文件已有部分内容，_check_files_present 会误判成就绪，
+            # 前端据此显示绿色「已就绪」，实际加载会失败
+            downloaded = False
         else:
             downloaded = _check_files_present(mid)
         models.append({

@@ -38,7 +38,7 @@ async def voice_pipeline(
         return {"error": "ASR 未识别到文本", "steps": steps}
 
     # Step 2: NLP
-    nlp_model = params.get("nlp_model", "qwen")
+    nlp_model = params.get("nlp_model", "qwen3")
     nlp_params = {"task": params.get("nlp_task", "chat")}
     nlp_result = await nlp_adapter.infer(text, model=nlp_model, params=nlp_params)
     steps.append({"step": "nlp", "model": nlp_model, "result": nlp_result})

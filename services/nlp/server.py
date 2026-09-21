@@ -1,5 +1,6 @@
-"""NLP 模型服务 — SmolLM2 / Qwen2.5-0.5B（via llama-cpp-python）"""
+"""NLP 模型服务 — Qwen3-4B / Qwen2.5-0.5B / SmolLM2（via llama-cpp-python）"""
 
+import os
 import time
 import logging
 from pathlib import Path
@@ -11,9 +12,31 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="NLP Service")
 
 MODEL_FILES = {
+    "qwen3": "/models/qwen3-4b-instruct-2507-q4_k_m.gguf",
     "qwen": "/models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
     "smollm2": "/models/smollm2.gguf",
 }
+
+
+def _default_threads() -> int:
+    """默认线程数取物理核心数，不要取逻辑核数
+
+    i5-10400 是 6 核 12 线程：n_threads=12 时两个超线程争抢同一个物理核的执行单元，
+    实测从 43 tok/s 崩到 1.5 tok/s（掉了 28 倍）。可用 NLP_N_THREADS 覆盖。
+    """
+    n = os.cpu_count() or 4
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("cpu cores"):
+                return int(line.split(":")[1]) or n
+    except Exception:
+        pass
+    return max(1, n // 2)
+
+
+N_THREADS = int(os.environ.get("NLP_N_THREADS") or _default_threads())
+# 2048 对 4B 模型偏局促。KV cache 约 144KB/token（36 层 / 8 个 KV 头），4096 约占 590MB
+N_CTX = int(os.environ.get("NLP_N_CTX") or 4096)
 
 _loaded_models: dict = {}
 
@@ -31,7 +54,7 @@ def get_model(model_id: str):
     try:
         from llama_cpp import Llama
         logger.info(f"加载模型 {model_id}: {MODEL_FILES[model_id]}")
-        llm = Llama(model_path=MODEL_FILES[model_id], n_ctx=2048, n_threads=4, verbose=False)
+        llm = Llama(model_path=MODEL_FILES[model_id], n_ctx=N_CTX, n_threads=N_THREADS, verbose=False)
         _loaded_models[model_id] = llm
         logger.info(f"模型 {model_id} 加载完成")
         return llm

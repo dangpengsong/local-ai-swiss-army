@@ -24,14 +24,18 @@ download() {
     echo "  📥 下载 $name ..."
     # 替换 huggingface.co 为镜像
     local mirror_url="${url/https:\/\/huggingface.co/$HF_MIRROR}"
-    wget --no-check-certificate -q --show-progress -O "$output" "$mirror_url" 2>&1 || {
+    # 先写 .part，下完再改名。gateway 的就绪判定只看「文件存在且非空」，直接写目标文件
+    # 会让下到一半的模型在面板上显示绿色「已就绪」，点推理才报错。上轮中断的残留也一并清掉。
+    rm -f "$output.part"
+    wget --no-check-certificate -q --show-progress -O "$output.part" "$mirror_url" 2>&1 || {
         echo "  ❌ 下载失败，尝试 curl ..."
-        curl -L -k -o "$output" "$mirror_url" 2>&1 || {
+        curl -L -k -o "$output.part" "$mirror_url" 2>&1 || {
             echo "  ❌ curl 也失败了，请手动下载"
-            rm -f "$output"
+            rm -f "$output.part"
             return 1
         }
     }
+    mv "$output.part" "$output"
     echo "  ✅ $name 下载完成"
 }
 
@@ -96,6 +100,9 @@ download_tts() {
 
 download_nlp() {
     echo "── NLP 模型 ──"
+    download "Qwen3-4B-Instruct-2507-GGUF（约 2.3GB，推荐主力）" \
+        "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" \
+        "models/nlp/qwen3-4b-instruct-2507-q4_k_m.gguf"
     download "Qwen2.5-0.5B-GGUF" \
         "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf" \
         "models/nlp/qwen2.5-0.5b-instruct-q4_k_m.gguf"

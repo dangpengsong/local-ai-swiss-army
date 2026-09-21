@@ -1,16 +1,16 @@
-"""NLP 适配器 — SmolLM2 / Qwen2.5-0.5B（via llama.cpp）"""
+"""NLP 适配器 — Qwen3-4B / SmolLM2 / Qwen2.5-0.5B（via llama.cpp）"""
 
 from .base import BaseServiceAdapter
 from ..mock import mock_nlp
 
-SUPPORTED_MODELS = ["smollm2", "qwen"]
+SUPPORTED_MODELS = ["qwen3", "smollm2", "qwen"]
 
 
 class NLPAdapter(BaseServiceAdapter):
     def __init__(self, service_url: str, mock_mode: str = "auto"):
         super().__init__(service_url, "NLP", mock_mode)
 
-    async def infer(self, input_data: str, model: str = "qwen", params: dict = None) -> dict:
+    async def infer(self, input_data: str, model: str = "qwen3", params: dict = None) -> dict:
         params = params or {}
         task = params.get("task", "chat")
 

@@ -433,6 +433,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <div class="field">
         <div class="field-label">模型</div>
         <select id="nlp-model">
+          <option value="qwen3">Qwen3-4B</option>
           <option value="qwen">Qwen2.5-0.5B</option>
           <option value="smollm2">SmolLM2</option>
         </select>
@@ -863,7 +864,7 @@ const PIPELINE_CONFIGS = {
     desc: '上传一段音频，自动完成：语音转文字 → AI 理解处理 → 翻译 → 语音合成输出',
     steps: [
       {icon:'\u{1F399}', name:'语音识别', model:'whisper'},
-      {icon:'\u{1F916}', name:'文本AI', model:'qwen'},
+      {icon:'\u{1F916}', name:'文本AI', model:'qwen3'},
       {icon:'\u{1F310}', name:'翻译', model:'mtran'},
       {icon:'\u{1F50A}', name:'语音合成', model:'piper'},
     ]

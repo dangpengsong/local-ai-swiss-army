@@ -89,12 +89,12 @@ curl -s -X POST "$BASE_URL/tts" \
   -H "Content-Type: application/json" \
   -d '{"input": "你好世界", "model": "piper"}' | python3 -m json.tool
 
-# NLP
+# NLP（用推荐主力 Qwen3-4B；纯 CPU 约 7 tok/s，本步需等十几秒属正常）
 echo ""
 echo "6️⃣ NLP 测试..."
 curl -s -X POST "$BASE_URL/nlp" \
   -H "Content-Type: application/json" \
-  -d '{"input": "介绍一下你自己", "model": "qwen", "params": {"task": "chat"}}' | python3 -m json.tool
+  -d '{"input": "介绍一下你自己", "model": "qwen3", "params": {"task": "chat"}}' | python3 -m json.tool
 
 # 语音管线
 echo ""
