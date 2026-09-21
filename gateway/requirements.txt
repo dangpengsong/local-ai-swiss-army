@@ -1,7 +1,9 @@
-fastapi>=0.115.0
-uvicorn>=0.32.0
-httpx>=0.27.0
-python-multipart>=0.0.9
-jinja2>=3.1.0
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
+# 版本锁定为实测可用的组合 —— 保证任何人 clone 后构建出的依赖一致。
+# 升级某个包前请整体构建测试，再同步修改本文件。
+fastapi==0.141.1
+uvicorn==0.53.0
+httpx==0.28.1
+python-multipart==0.0.32
+jinja2==3.1.6
+pydantic==2.13.5
+pydantic-settings==2.15.0

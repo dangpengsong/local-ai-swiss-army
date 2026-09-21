@@ -15,13 +15,14 @@ app = FastAPI(title="ASR Service")
 _whisper_model = None
 _model_ready = False
 
-# CTranslate2 模型目录（包含 model.bin 等文件）
+# CTranslate2 模型目录；这 4 个文件缺一，WhisperModel() 加载即报错
 _MODEL_DIR = Path("/models/whisper-base-ct2")
-_MODEL_BIN = Path("/models/model.bin")
+_REQUIRED_FILES = ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")
 
 
 def _check_whisper_model():
-    return _MODEL_DIR.is_dir() or _MODEL_BIN.exists()
+    """4 个文件齐全才算就绪（此前只看目录存在，下载中断也会显示「已就绪」）"""
+    return all((_MODEL_DIR / name).is_file() for name in _REQUIRED_FILES)
 
 
 def get_whisper_model():
@@ -35,9 +36,8 @@ def get_whisper_model():
     try:
         from faster_whisper import WhisperModel
         logger.info("加载 whisper 模型...")
-        # 优先使用 CTranslate2 目录，否则尝试 model.bin
-        model_path = str(_MODEL_DIR) if _MODEL_DIR.is_dir() else str(_MODEL_BIN)
-        _whisper_model = WhisperModel(model_path, device="cpu", compute_type="int8")
+        # faster-whisper 只接受 CTranslate2 目录（单个 .bin 文件路径无法加载）
+        _whisper_model = WhisperModel(str(_MODEL_DIR), device="cpu", compute_type="int8")
         _model_ready = True
         logger.info("whisper 模型加载完成")
         return _whisper_model
@@ -73,8 +73,9 @@ async def infer(req: InferRequest):
     if req.model == "whisper":
         model = get_whisper_model()
         if model is None:
+            # 失败一律走 error 字段：塞进 output 会被标记为"真实"结果展示
             return {
-                "output": "[whisper 模型未就绪：权重文件未找到或 faster-whisper 未安装]",
+                "error": "whisper 模型未就绪：权重文件未找到或 faster-whisper 未安装",
                 "model": req.model,
                 "latency_ms": int((time.time() - start) * 1000),
             }
@@ -92,12 +93,16 @@ async def infer(req: InferRequest):
             Path(tmp_path).unlink(missing_ok=True)
         except Exception as e:
             logger.error(f"推理失败: {e}")
-            text = f"[识别错误: {str(e)}]"
+            return {
+                "error": f"识别失败: {e}",
+                "model": req.model,
+                "latency_ms": int((time.time() - start) * 1000),
+            }
 
         return {"output": text, "model": req.model, "latency_ms": int((time.time() - start) * 1000)}
 
     return {
-        "output": f"[模型 {req.model} 暂未实现真实推理]",
+        "error": f"ASR 模型 {req.model} 尚未实现真实推理",
         "model": req.model,
         "latency_ms": int((time.time() - start) * 1000),
     }

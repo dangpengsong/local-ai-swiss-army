@@ -7,11 +7,12 @@ services:
     environment:
       - ASR_URL=http://asr:8001
       - TRANSLATE_URL=http://translate:8002
-      - OCR_URL=http://ocr:8003
       - TTS_URL=http://tts:8004
       - NLP_URL=http://nlp:8005
       - MTRAN_URL=http://mtran:8989
       - LOCAL_AI_MOCK=${LOCAL_AI_MOCK:-auto}
+      # 模型管理页的下载源（海外可改 .env 里的 HF_ENDPOINT 切回 huggingface.co）
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
       - ./web:/app/web:ro
       - ./models:/app/models
@@ -20,9 +21,6 @@ services:
         condition: service_started
         required: false
       translate:
-        condition: service_started
-        required: false
-      ocr:
         condition: service_started
         required: false
       tts:
@@ -43,24 +41,14 @@ services:
       - ./models/asr:/models
     restart: unless-stopped
 
+  # argos 语言包在构建镜像时装进去（见 services/translate/Dockerfile），
+  # 因此不需要挂载卷，也没有语言包相关的环境变量
   translate:
     build: ./services/translate
     container_name: la-translate
     profiles: ["full"]
     ports:
       - "8002:8002"
-    volumes:
-      - ./models/translate:/models
-    restart: unless-stopped
-
-  ocr:
-    build: ./services/ocr
-    container_name: la-ocr
-    profiles: ["full"]
-    ports:
-      - "8003:8003"
-    volumes:
-      - ./models/ocr:/models
     restart: unless-stopped
 
   tts:
@@ -69,6 +57,13 @@ services:
     profiles: ["full"]
     ports:
       - "8004:8004"
+    environment:
+      # 默认中文语音；xiao_ya 为拼音方案（音质更自然），huayan 为 espeak 方案
+      - TTS_PIPER_VOICE=${TTS_PIPER_VOICE:-zh_CN-xiao_ya-medium}
+      # 拼音方案依赖的 g2pW 注音模型缺失时，从该镜像源下载
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      # HF 缓存指向挂载卷，避免容器重建后重复下载（g2pW 的 tokenizer 等）
+      - HF_HOME=/models/.hf
     volumes:
       - ./models/tts:/models
     restart: unless-stopped
@@ -83,11 +78,17 @@ services:
       - ./models/nlp:/models
     restart: unless-stopped
 
-  # MTranServer 独立翻译服务
+  # MTranServer 独立翻译服务（自带 /imme 端点，可直接对接沉浸式翻译）
+  # 固定版本而非 latest：上游一发新版就会被拉到，行为变化不可控
   mtran:
-    image: xxnuo/mtranserver:latest
+    image: xxnuo/mtranserver:4.0.33
     container_name: la-mtran
     profiles: ["full"]
     ports:
       - "8989:8989"
+    environment:
+      # 模型目录指向挂载卷；否则按语言对首次翻译时下载的模型会随容器重建丢失
+      - MT_MODEL_DIR=/models
+    volumes:
+      - ./models/mtran:/models
     restart: unless-stopped

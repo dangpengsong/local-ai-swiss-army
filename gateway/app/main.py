@@ -13,7 +13,6 @@ from pydantic import BaseModel
 from .config import get_settings
 from .adapters.asr import ASRAdapter
 from .adapters.translate import TranslateAdapter
-from .adapters.ocr import OCRAdapter
 from .adapters.tts import TTSAdapter
 from .adapters.nlp import NLPAdapter
 from .pipelines.registry import get_pipeline, list_pipelines
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Local AI Swiss Army",
-    description="本地小模型全栈 Demo — 12 模型 / 5 类 / Mock 优先",
+    description="本地小模型全栈 Demo — 11 模型 / 4 类 / Mock 优先",
     version="0.1.0",
 )
 
@@ -33,7 +32,6 @@ def _init_adapters():
     return {
         "asr": ASRAdapter(s.asr_url, s.local_ai_mock),
         "translate": TranslateAdapter(s.translate_url, s.local_ai_mock, mtran_url=s.mtran_url),
-        "ocr": OCRAdapter(s.ocr_url, s.local_ai_mock),
         "tts": TTSAdapter(s.tts_url, s.local_ai_mock),
         "nlp": NLPAdapter(s.nlp_url, s.local_ai_mock),
     }
@@ -48,10 +46,23 @@ MODEL_REGISTRY = {
         "name": "faster-whisper-base",
         "category": "asr",
         "desc": "CPU 量化语音识别 (CTranslate2)",
-        "files": ["models/asr/whisper-base-ct2/model.bin"],
+        # CTranslate2 目录需这 4 个文件齐全，缺一加载即失败（此前只下 model.bin）
+        "files": [
+            "models/asr/whisper-base-ct2/model.bin",
+            "models/asr/whisper-base-ct2/config.json",
+            "models/asr/whisper-base-ct2/tokenizer.json",
+            "models/asr/whisper-base-ct2/vocabulary.txt",
+        ],
+        "urls": [
+            "https://huggingface.co/Systran/faster-whisper-base/resolve/main/model.bin",
+            "https://huggingface.co/Systran/faster-whisper-base/resolve/main/config.json",
+            "https://huggingface.co/Systran/faster-whisper-base/resolve/main/tokenizer.json",
+            "https://huggingface.co/Systran/faster-whisper-base/resolve/main/vocabulary.txt",
+        ],
         "url": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/model.bin",
         "size_mb": 148,
     },
+    # planned: 服务端尚未实现，仅在注册表中占位；UI 中标注「未实现」并禁止选择
     "funasr": {
         "name": "Fun-ASR",
         "category": "asr",
@@ -59,6 +70,7 @@ MODEL_REGISTRY = {
         "files": ["models/asr/funasr-model"],
         "url": "",
         "size_mb": 350,
+        "planned": True,
     },
     "moonshine": {
         "name": "Moonshine",
@@ -67,6 +79,7 @@ MODEL_REGISTRY = {
         "files": ["models/asr/moonshine-model"],
         "url": "",
         "size_mb": 50,
+        "planned": True,
     },
     "mtran": {
         "name": "MTranServer",
@@ -80,37 +93,43 @@ MODEL_REGISTRY = {
     "argos": {
         "name": "Argos Translate",
         "category": "translate",
-        "desc": "开源离线翻译（Docker 内置）",
+        "desc": "开源离线翻译（语言包已内置在镜像中）",
         "files": [],
         "builtin": True,
         "url": "",
-        "size_mb": 200,
-    },
-    "ppocr": {
-        "name": "PPOCR-v5",
-        "category": "ocr",
-        "desc": "百度飞桨 OCR（Docker 内置）",
-        "files": [],
-        "builtin": True,
-        "url": "",
-        "size_mb": 10,
-    },
-    "tesseract": {
-        "name": "Tesseract",
-        "category": "ocr",
-        "desc": "经典 OCR 引擎（Docker 内置）",
-        "files": [],
-        "builtin": True,
-        "url": "",
-        "size_mb": 30,
+        # 4 个语言包（en↔zh、en↔ja）合计约 365MB，构建镜像时装好（解压后约占 423MB）
+        "size_mb": 365,
     },
     "piper": {
-        "name": "Piper",
+        "name": "Piper 小雅",
         "category": "tts",
-        "desc": "轻量语音合成",
-        "files": ["models/tts/piper-model"],
-        "url": "",
-        "size_mb": 25,
+        "desc": "轻量语音合成（拼音方案，停顿自然）",
+        # Piper 语音需 .onnx 与同名 .onnx.json 成对存在
+        "files": [
+            "models/tts/piper/zh_CN-xiao_ya-medium.onnx",
+            "models/tts/piper/zh_CN-xiao_ya-medium.onnx.json",
+        ],
+        "urls": [
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx",
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx.json",
+        ],
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx",
+        "size_mb": 63,
+    },
+    "piper_huayan": {
+        "name": "Piper 华言",
+        "category": "tts",
+        "desc": "备选中文语音（espeak 方案，中英混读略好）",
+        "files": [
+            "models/tts/piper/zh_CN-huayan-medium.onnx",
+            "models/tts/piper/zh_CN-huayan-medium.onnx.json",
+        ],
+        "urls": [
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json",
+        ],
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
+        "size_mb": 63,
     },
     "outetts": {
         "name": "OuteTTS-0.6B",
@@ -119,6 +138,7 @@ MODEL_REGISTRY = {
         "files": ["models/tts/outetts-model"],
         "url": "",
         "size_mb": 600,
+        "planned": True,
     },
     "openaudio": {
         "name": "OpenAudio S1-Mini",
@@ -127,6 +147,7 @@ MODEL_REGISTRY = {
         "files": ["models/tts/openaudio-model"],
         "url": "",
         "size_mb": 500,
+        "planned": True,
     },
     "smollm2": {
         "name": "SmolLM2",
@@ -150,16 +171,13 @@ MODEL_REGISTRY = {
 _download_tasks: dict[str, dict] = {}
 
 
-def _check_model_downloaded(model_id: str) -> bool:
-    cfg = MODEL_REGISTRY[model_id]
-    # Docker 内置模型，始终就绪
-    if cfg.get("builtin"):
-        return True
-    for f in cfg["files"]:
-        p = Path(f)
-        if p.exists() and p.stat().st_size > 0:
-            return True
-    return False
+def _check_files_present(model_id: str) -> bool:
+    """检查模型文件是否全部下载到位"""
+    files = MODEL_REGISTRY[model_id]["files"]
+    if not files:
+        return False
+    # 多文件模型（Piper 的 .onnx + .onnx.json、whisper 的 4 个文件）需全部就位才算就绪
+    return all(Path(f).exists() and Path(f).stat().st_size > 0 for f in files)
 
 
 # ── Pydantic 模型 ──
@@ -201,25 +219,84 @@ async def _probe_service_health(url: str) -> dict:
     return {}
 
 
+def _model_service_urls(model_id: str) -> list[str]:
+    """模型对应的服务地址
+
+    translate 类有两个独立容器：argos 在 translate 服务，mtran 在 mtran 容器。
+    """
+    s = get_settings()
+    return {
+        "whisper": [s.asr_url],
+        "funasr": [s.asr_url],
+        "moonshine": [s.asr_url],
+        "argos": [s.translate_url],
+        "mtran": [s.mtran_url],
+        "piper": [s.tts_url],
+        "piper_huayan": [s.tts_url],
+        "outetts": [s.tts_url],
+        "openaudio": [s.tts_url],
+        "smollm2": [s.nlp_url],
+        "qwen": [s.nlp_url],
+    }.get(model_id, [])
+
+
+def _service_alive(model_id: str, healths: dict) -> bool:
+    """模型所属服务是否在运行"""
+    return any((healths.get(u) or {}).get("status") == "ok"
+               for u in _model_service_urls(model_id))
+
+
+async def _probe_urls(urls) -> dict:
+    """并发探测多个服务 /health，返回 {url: health_json}
+
+    串行探测时，每个未启动的服务都要等满超时，模型管理页会卡好几秒。
+    """
+    urls = list(urls)
+    if not urls:
+        return {}
+    healths = await asyncio.gather(*(_probe_service_health(u) for u in urls))
+    return dict(zip(urls, healths))
+
+
+def _builtin_ready(model_id: str, healths: dict) -> bool:
+    """builtin 模型的就绪判定 = 对应服务在跑，且该模型在服务里可用
+
+    此前对 builtin 直接 return True，容器没启动时网页仍显示「已就绪」，
+    用户据此选中该模型，实际只会拿到 mock 结果。
+    """
+    for url in _model_service_urls(model_id):
+        health = healths.get(url) or {}
+        info = (health.get("models") or {}).get(model_id)
+        if info is None:
+            # 服务健康但未自报模型清单（如 MTranServer 只返回 {"status":"ok"}）→ 以服务存活为准
+            if health.get("status") == "ok":
+                return True
+            continue
+        if info.get("weight_ready"):
+            return True
+    return False
+
+
 @app.get("/status")
 async def status():
     """返回所有服务可用性（含模型权重检测）"""
-    result = {}
-    for name, adapter in adapters.items():
-        available = adapter.is_available()
+    async def _one(name: str):
+        adapter = adapters[name]
+        # any_backend_available 内部是同步 httpx，放线程里跑以免阻塞事件循环
+        available = await asyncio.to_thread(adapter.any_backend_available)
         models_info = {}
-
         if available:
             health_data = await _probe_service_health(adapter.service_url)
             models_info = health_data.get("models", {})
-
-        result[name] = {
+        return name, {
             "available": available,
             "mock": adapter.should_mock(),
             "url": adapter.service_url,
             "models": models_info,
         }
-    return result
+
+    # 并发探测：串行时每个未启动的服务都要等满超时，状态栏会卡好几秒
+    return dict(await asyncio.gather(*(_one(n) for n in adapters)))
 
 
 # ── 模型管理 API ──
@@ -227,10 +304,21 @@ async def status():
 @app.get("/models")
 async def list_models():
     """列出所有模型及其下载状态"""
+    # 并发探测全部服务（串行会让每个未启动的服务各等满超时）
+    urls = {u for mid in MODEL_REGISTRY for u in _model_service_urls(mid)}
+    healths = await _probe_urls(urls)
+
     models = []
     for mid, cfg in MODEL_REGISTRY.items():
-        downloaded = _check_model_downloaded(mid)
         progress = _download_tasks.get(mid)
+        running = _service_alive(mid, healths)
+        if cfg.get("planned"):
+            downloaded = False
+        elif cfg.get("builtin"):
+            # 无文件可下载，是否就绪全看服务
+            downloaded = _builtin_ready(mid, healths)
+        else:
+            downloaded = _check_files_present(mid)
         models.append({
             "id": mid,
             "name": cfg["name"],
@@ -238,6 +326,11 @@ async def list_models():
             "desc": cfg["desc"],
             "size_mb": cfg["size_mb"],
             "downloaded": downloaded,
+            # 文件齐 ≠ 能用：服务没跑时照样只会返回 mock，前端要能区分
+            "service_running": running,
+            "builtin": bool(cfg.get("builtin")),
+            # planned 模型服务端尚未实现，不能显示成「需手动配置」
+            "planned": bool(cfg.get("planned")),
             "has_url": bool(cfg["url"]),
             "progress": progress,
         })
@@ -251,10 +344,14 @@ async def download_model(model_id: str):
         return {"error": f"未知模型: {model_id}"}
 
     cfg = MODEL_REGISTRY[model_id]
+    if cfg.get("planned"):
+        return {"error": f"模型 {cfg['name']} 尚未实现，暂不可用（计划中）"}
+    if cfg.get("builtin"):
+        return {"error": f"模型 {cfg['name']} 由 Docker 镜像内置，无需下载，请确认对应服务已启动"}
     if not cfg["url"]:
         return {"error": f"模型 {cfg['name']} 暂不支持在线下载，需手动配置"}
 
-    if _check_model_downloaded(model_id):
+    if _check_files_present(model_id):
         return {"message": f"模型 {cfg['name']} 已存在", "already_exists": True}
 
     if model_id in _download_tasks and _download_tasks[model_id].get("status") == "downloading":
@@ -273,37 +370,58 @@ async def download_model(model_id: str):
 
 
 async def _do_download(model_id: str, cfg: dict):
-    """后台下载模型文件"""
+    """后台下载模型文件（支持 urls 多文件，如 Piper 的 .onnx + .onnx.json）"""
     import httpx
-    url = cfg["url"].replace("https://huggingface.co/", "https://hf-mirror.com/")
-    target = Path(cfg["files"][0])
-    target.parent.mkdir(parents=True, exist_ok=True)
+    urls = cfg.get("urls") or [cfg["url"]]
+    targets = [Path(f) for f in cfg["files"]]
+    for t in targets:
+        t.parent.mkdir(parents=True, exist_ok=True)
+
+    def _mirror(url: str) -> str:
+        """把 HuggingFace 直链换到 HF_ENDPOINT 指定的源
+
+        此前这里写死 hf-mirror，而 HF_ENDPOINT 只加在 tts 服务上 —— 海外用户
+        照 README 改了 .env，面板下载依然全走镜像，与文档承诺的不一致。
+        """
+        endpoint = get_settings().hf_endpoint.rstrip("/")
+        return url.replace("https://huggingface.co/", f"{endpoint}/")
 
     task = _download_tasks[model_id]
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=600) as client:
-            async with client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                total = int(resp.headers.get("content-length", cfg["size_mb"] * 1024 * 1024))
-                downloaded = 0
-                with open(target, "wb") as f:
-                    async for chunk in resp.aiter_bytes(chunk_size=65536):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        task["progress_pct"] = round(downloaded / total * 100, 1) if total > 0 else 0
-                        task["downloaded_mb"] = round(downloaded / 1024 / 1024, 1)
-                        task["total_mb"] = round(total / 1024 / 1024, 1)
+            # 预取各文件大小，用于计算整体进度
+            sizes = []
+            for url in urls:
+                try:
+                    head = await client.head(_mirror(url))
+                    sizes.append(int(head.headers.get("content-length", 0)))
+                except Exception:
+                    sizes.append(0)
+            total = sum(sizes) or cfg["size_mb"] * 1024 * 1024
+            task["total_mb"] = round(total / 1024 / 1024, 1)
+
+            downloaded = 0
+            for url, target in zip(urls, targets):
+                async with client.stream("GET", _mirror(url)) as resp:
+                    resp.raise_for_status()
+                    with open(target, "wb") as f:
+                        async for chunk in resp.aiter_bytes(chunk_size=65536):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            task["progress_pct"] = round(downloaded / total * 100, 1) if total > 0 else 0
+                            task["downloaded_mb"] = round(downloaded / 1024 / 1024, 1)
 
         task["status"] = "done"
         task["progress_pct"] = 100
         task["downloaded_mb"] = task["total_mb"]
-        logger.info(f"模型 {cfg['name']} 下载完成: {target}")
+        logger.info(f"模型 {cfg['name']} 下载完成: {targets}")
     except Exception as e:
         task["status"] = "error"
         task["error"] = str(e)
         logger.error(f"模型 {cfg['name']} 下载失败: {e}")
-        if target.exists():
-            target.unlink()
+        for t in targets:
+            if t.exists():
+                t.unlink()
 
 
 @app.get("/models/{model_id}/progress")
@@ -312,7 +430,7 @@ async def model_download_progress(model_id: str):
     if model_id not in MODEL_REGISTRY:
         return {"error": f"未知模型: {model_id}"}
 
-    downloaded = _check_model_downloaded(model_id)
+    downloaded = _check_files_present(model_id)
     progress = _download_tasks.get(model_id)
 
     if downloaded and (not progress or progress.get("status") != "downloading"):
@@ -333,10 +451,6 @@ async def asr_infer(req: InferRequest):
 @app.post("/translate")
 async def translate_infer(req: InferRequest):
     return await adapters["translate"].infer(req.input, req.model, req.params)
-
-@app.post("/ocr")
-async def ocr_infer(req: InferRequest):
-    return await adapters["ocr"].infer(req.input, req.model, req.params)
 
 @app.post("/tts")
 async def tts_infer(req: InferRequest):
@@ -362,16 +476,6 @@ async def voice_pipeline(req: PipelineRequest):
         nlp_adapter=adapters["nlp"],
         translate_adapter=adapters["translate"],
         tts_adapter=adapters["tts"],
-        params=req.params,
-    )
-
-@app.post("/pipeline/document")
-async def document_pipeline(req: PipelineRequest):
-    from .pipelines.document import document_pipeline
-    return await document_pipeline(
-        image_input=req.input,
-        ocr_adapter=adapters["ocr"],
-        nlp_adapter=adapters["nlp"],
         params=req.params,
     )
 

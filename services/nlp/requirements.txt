@@ -1,3 +1,4 @@
-fastapi>=0.115.0
-uvicorn>=0.32.0
-llama-cpp-python>=0.3.0
+# 版本锁定为实测可用的组合 —— llama-cpp-python 需编译，且 Llama() 参数随版本变动
+fastapi==0.141.1
+uvicorn==0.53.0
+llama-cpp-python==0.3.35

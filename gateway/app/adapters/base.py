@@ -1,5 +1,6 @@
 """适配器基类 + Mock Mixin"""
 
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -7,6 +8,19 @@ import httpx
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 服务可用性缓存时长（秒）。失败态缓存更短，
+# 这样后启动的服务（如 mtran 容器）就绪后能自动恢复，无需重启 gateway。
+OK_TTL = 30.0
+FAIL_TTL = 10.0
+
+
+def probe_health(url: str, timeout: float = 2.0) -> bool:
+    """探测服务 /health 是否返回 200"""
+    try:
+        return httpx.get(f"{url.rstrip('/')}/health", timeout=timeout).status_code == 200
+    except Exception:
+        return False
 
 
 class MockMode(str, Enum):
@@ -23,6 +37,7 @@ class BaseServiceAdapter(ABC):
         self.service_name = service_name
         self.mock_mode = mock_mode
         self._available: bool | None = None
+        self._checked_at: float = 0.0
 
     def should_mock(self) -> bool:
         """判断是否应使用 Mock 输出"""
@@ -31,18 +46,23 @@ class BaseServiceAdapter(ABC):
         if self.mock_mode == MockMode.OFF:
             return False
         # AUTO: 检查服务是否可用
-        return not self.is_available()
+        return not self.any_backend_available()
+
+    def any_backend_available(self) -> bool:
+        """是否有任一后端可用；多后端适配器（如 translate）可覆写"""
+        return self.is_available()
 
     def is_available(self) -> bool:
-        """检查真实模型服务是否可达"""
+        """检查真实模型服务是否可达（带 TTL 缓存，避免结果被永久固化）"""
+        now = time.time()
         if self._available is not None:
-            return self._available
-        try:
-            resp = httpx.get(f"{self.service_url}/health", timeout=2.0)
-            self._available = resp.status_code == 200
-        except Exception:
-            self._available = False
+            ttl = OK_TTL if self._available else FAIL_TTL
+            if now - self._checked_at < ttl:
+                return self._available
+        self._available = probe_health(self.service_url)
+        if not self._available:
             logger.info(f"[{self.service_name}] 服务不可达，降级为 Mock")
+        self._checked_at = now
         return self._available
 
     async def call_service(self, payload: dict) -> dict:
@@ -54,7 +74,9 @@ class BaseServiceAdapter(ABC):
             )
             resp.raise_for_status()
             result = resp.json()
-            result.setdefault("mock", False)
+            # error 响应没有「真实/模拟」之分，标 mock:false 会造成语义矛盾
+            if "error" not in result:
+                result.setdefault("mock", False)
             return result
 
     @abstractmethod

@@ -1,2 +1,5 @@
-fastapi>=0.115.0
-uvicorn>=0.32.0
+# 版本锁定为实测可用的组合 —— piper-tts 依赖 transformers，两者大版本升级都会改 API
+fastapi==0.141.1
+uvicorn==0.53.0
+# [zh] 额外依赖：g2pW 中文注音（拼音方案语音如 zh_CN-xiao_ya-medium 必需）
+piper-tts[zh]==1.8.0

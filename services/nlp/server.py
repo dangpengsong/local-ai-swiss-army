@@ -73,8 +73,9 @@ async def infer(req: InferRequest):
     task = params.get("task", "chat")
 
     if not _model_weight_exists(req.model):
+        # 失败一律走 error 字段：塞进 output 会被标记为"真实"结果展示
         return {
-            "output": f"[模型 {req.model} 权重未找到，请先下载到 /models/]",
+            "error": f"模型 {req.model} 权重未找到，请先下载到 /models/",
             "model": req.model,
             "latency_ms": int((time.time() - start) * 1000),
         }
@@ -82,7 +83,7 @@ async def infer(req: InferRequest):
     llm = get_model(req.model)
     if llm is None:
         return {
-            "output": f"[模型 {req.model} 加载失败]",
+            "error": f"模型 {req.model} 加载失败",
             "model": req.model,
             "latency_ms": int((time.time() - start) * 1000),
         }
@@ -102,6 +103,10 @@ async def infer(req: InferRequest):
         output = response["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.error(f"推理失败: {e}")
-        output = f"[推理错误: {str(e)}]"
+        return {
+            "error": f"推理失败: {e}",
+            "model": req.model,
+            "latency_ms": int((time.time() - start) * 1000),
+        }
 
     return {"output": output, "model": req.model, "latency_ms": int((time.time() - start) * 1000)}

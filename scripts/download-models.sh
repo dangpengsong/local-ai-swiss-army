@@ -13,7 +13,7 @@ echo "  类别: $CATEGORY"
 echo "============================================"
 echo ""
 
-mkdir -p models/{asr,translate,ocr,tts,nlp}
+mkdir -p models/{asr,tts,nlp,mtran}
 
 download() {
     local name=$1 url=$2 output=$3
@@ -55,21 +55,41 @@ download_asr() {
 
 download_translate() {
     echo "── 翻译模型 ──"
-    echo "  ⚠️  MTranServer: 使用独立 Docker 容器，无需下载"
-    echo "  ⚠️  Argos Translate: 首次运行时自动安装语言包"
-    echo ""
-}
-
-download_ocr() {
-    echo "── OCR 模型 ──"
-    echo "  ⚠️  Tesseract: 语言包在 Docker 构建时安装"
-    echo "  ⚠️  PPOCR: 首次运行时自动下载模型"
+    echo "  ℹ️  Argos: 语言包已内置在镜像里（构建时下载），无需在此处理"
+    echo "  ⚠️  MTranServer: 使用独立 Docker 容器；翻译模型在首次翻译时自动下载到 models/mtran/"
     echo ""
 }
 
 download_tts() {
     echo "── TTS 模型 ──"
-    echo "  ⚠️  Piper: 需手动下载 .onnx 模型到 models/tts/"
+    local piper_base="https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN"
+    mkdir -p models/tts/piper models/tts/g2pW
+
+    # 默认语音：小雅（拼音方案，停顿更自然）
+    download "Piper 中文语音 zh_CN-xiao_ya-medium (.onnx)" \
+        "$piper_base/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx" \
+        "models/tts/piper/zh_CN-xiao_ya-medium.onnx"
+    download "Piper 中文语音 zh_CN-xiao_ya-medium (.onnx.json)" \
+        "$piper_base/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx.json" \
+        "models/tts/piper/zh_CN-xiao_ya-medium.onnx.json"
+
+    # 备选语音：华言（espeak 方案，中英混读略好）
+    download "Piper 中文语音 zh_CN-huayan-medium (.onnx)" \
+        "$piper_base/huayan/medium/zh_CN-huayan-medium.onnx" \
+        "models/tts/piper/zh_CN-huayan-medium.onnx"
+    download "Piper 中文语音 zh_CN-huayan-medium (.onnx.json)" \
+        "$piper_base/huayan/medium/zh_CN-huayan-medium.onnx.json" \
+        "models/tts/piper/zh_CN-huayan-medium.onnx.json"
+
+    # 小雅依赖的 g2pW 注音模型（约 152MB，仅拼音方案需要）
+    download "g2pW 中文注音模型（约 152MB）" \
+        "https://huggingface.co/datasets/rhasspy/piper-checkpoints/resolve/main/zh/zh_CN/_resources/g2pw.tar.gz" \
+        "models/tts/g2pW/g2pw.tar.gz"
+    if [ -f models/tts/g2pW/g2pw.tar.gz ] && [ ! -f models/tts/g2pW/g2pw.onnx ]; then
+        echo "  📦 解压 g2pW 注音模型 ..."
+        tar xzf models/tts/g2pW/g2pw.tar.gz -C models/tts/g2pW && rm -f models/tts/g2pW/g2pw.tar.gz
+        echo "  ✅ g2pW 解压完成"
+    fi
     echo "  ⚠️  OuteTTS / OpenAudio: 需手动下载"
     echo ""
 }
@@ -88,18 +108,16 @@ download_nlp() {
 case "$CATEGORY" in
     asr)       download_asr ;;
     translate) download_translate ;;
-    ocr)       download_ocr ;;
     tts)       download_tts ;;
     nlp)       download_nlp ;;
     all)
         download_asr
         download_translate
-        download_ocr
         download_tts
         download_nlp
         ;;
     *)
-        echo "用法: $0 [asr|translate|ocr|tts|nlp|all]"
+        echo "用法: $0 [asr|translate|tts|nlp|all]"
         exit 1
         ;;
 esac
