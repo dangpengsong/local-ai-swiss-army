@@ -71,11 +71,32 @@ def get_model(model_id: str):
         return None
 
 
+SYSTEM_PROMPT = "你是一个有用的AI助手，请用中文回答。"
+
+# ⚠️ 这只是「直连本服务」时的回退副本，权威定义在 gateway/app/adapters/nlp.py。
+# gateway 调用时总会带着展开好的 messages 过来，正常路径走不到这里；
+# 要改模板请改 gateway 那份，并同步这一份，否则直连 /infer 的行为会与 gateway 不一致。
 TASK_PROMPTS = {
     "chat": "{input}",
     "summarize": "请用简洁的中文总结以下内容：\n\n{input}\n\n摘要：",
     "classify": "请对以下文本进行分类，只返回分类名称：\n\n{input}\n\n分类：",
 }
+
+
+def _build_messages(input_data: str, params: dict) -> list:
+    """优先用调用方给的 messages，没有才用本地模板。
+
+    模板的展开被上移到 gateway：GPU 模式下这个服务会被换成官方 llama.cpp
+    server，它根本没有 task 这个概念，模板只能由调用方展开；而 CPU / GPU 两种
+    部署必须产出同样的 prompt，展开逻辑就只能放在两者共同的调用方。
+    """
+    if params.get("messages"):
+        return params["messages"]
+    template = TASK_PROMPTS.get(params.get("task", "chat"), TASK_PROMPTS["chat"])
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": template.format(input=input_data)},
+    ]
 
 
 class InferRequest(BaseModel):
@@ -98,7 +119,6 @@ async def health():
 async def infer(req: InferRequest):
     start = time.time()
     params = req.params or {}
-    task = params.get("task", "chat")
 
     if not _model_weight_exists(req.model):
         # 失败一律走 error 字段：塞进 output 会被标记为"真实"结果展示
@@ -116,15 +136,9 @@ async def infer(req: InferRequest):
             "latency_ms": int((time.time() - start) * 1000),
         }
 
-    prompt_template = TASK_PROMPTS.get(task, TASK_PROMPTS["chat"])
-    user_message = prompt_template.format(input=req.input)
-
     try:
         response = llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": "你是一个有用的AI助手，请用中文回答。"},
-                {"role": "user", "content": user_message},
-            ],
+            messages=_build_messages(req.input, params),
             max_tokens=512,
             temperature=0.7,
         )
@@ -176,7 +190,6 @@ async def _error_stream(message: str):
 async def infer_stream(req: InferRequest):
     """流式推理。与 /infer 并存：管线（voice/custom）需要完整文本才能喂给下一步"""
     params = req.params or {}
-    task = params.get("task", "chat")
     start = time.time()
 
     if not _model_weight_exists(req.model):
@@ -192,11 +205,7 @@ async def infer_stream(req: InferRequest):
             media_type="text/event-stream",
         )
 
-    prompt_template = TASK_PROMPTS.get(task, TASK_PROMPTS["chat"])
-    messages = [
-        {"role": "system", "content": "你是一个有用的AI助手，请用中文回答。"},
-        {"role": "user", "content": prompt_template.format(input=req.input)},
-    ]
+    messages = _build_messages(req.input, params)
 
     async def gen():
         async with _infer_lock:

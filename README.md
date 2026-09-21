@@ -138,6 +138,25 @@ docker compose up -d gateway
 docker compose --profile full up -d --build
 ```
 
+**GPU 加速（可选，需 NVIDIA 显卡）：**
+
+有 NVIDIA 显卡时，文本 AI 可以走 GPU —— 用官方 llama.cpp CUDA 镜像替换自建的 CPU 版服务，实测**生成速度 2.6 倍**（GTX 960 上 18.7 vs 7.3 tok/s，首 token 142ms）：
+
+```bash
+# 服务名 / 端口 / profile 与上面完全一致，只是多一个 -f
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile full up -d
+```
+
+不加 `-f docker-compose.gpu.yml` 时行为与原来一字不差 —— 这个覆盖层只替换 `nlp` 一个服务的实现。
+
+几点注意：
+
+- **需要可用的 NVIDIA 驱动**。Docker Desktop for Windows 自带 GPU 支持，无需另装 `nvidia-container-toolkit`；没有显卡就别加这个 `-f`，容器会因请求不到设备而起不来
+- **启动后约 30 秒模型才就绪**（2.4GB 权重加载进显存）。这段时间 `/health` 返回 503，gateway 按既有的失败降级策略先返回 Mock 结果，就绪后自动恢复，不需要干预
+- **上下文固定 4096，不要调大**：4GB 显存下这已是上限（实测 3786/4096 MiB 已用）。同理 `-b 512 -ub 512` 也不能省，原因写在 `docker-compose.gpu.yml` 的注释里
+- 此模式下 `.env` 里的 `NLP_N_THREADS` / `NLP_N_CTX` **不生效**——它们只被自建的 Python 服务读取，官方 server 认的是命令行参数
+- 显卡显存小于 4GB 时可能装不下，先用 `docker compose ... logs nlp` 看有没有 `failed to fit params` 之类的报错
+
 ### 4. Web 面板下载模型
 
 也可以通过 Web 面板管理模型：
@@ -290,8 +309,9 @@ data: {"done": true, "model": "qwen3", "latency_ms": 8600}
 | `TTS_URL` | `http://tts:8004` | TTS 服务地址 |
 | `NLP_URL` | `http://nlp:8005` | NLP 服务地址 |
 | `MTRAN_URL` | `http://mtran:8989` | MTranServer 独立翻译容器地址 |
-| `NLP_N_THREADS` | 物理核心数 | NLP 推理线程数。**不要填逻辑核数**——超线程的两个线程会争抢同一物理核的执行单元，实测 i5-10400（6 核 12 线程）上 12 线程比 6 线程慢 **28 倍**（43 → 1.5 tok/s） |
-| `NLP_N_CTX` | `4096` | NLP 上下文长度。KV cache 约 144KB/token（Qwen3-4B，36 层 / 8 个 KV 头），4096 约占 590MB 内存 |
+| `NLP_BACKEND` | `llamacpp` | NLP 后端协议：`llamacpp` = 自建服务的 `/infer`；`openai` = 官方 llama.cpp server 的 `/v1/chat/completions`。GPU 覆盖层会自动设为 `openai`，一般不用手动改 |
+| `NLP_N_THREADS` | 物理核心数 | NLP 推理线程数。**不要填逻辑核数**——超线程的两个线程会争抢同一物理核的执行单元，实测 i5-10400（6 核 12 线程）上 12 线程比 6 线程慢 **28 倍**（43 → 1.5 tok/s）。GPU 模式下不生效 |
+| `NLP_N_CTX` | `4096` | NLP 上下文长度。KV cache 约 144KB/token（Qwen3-4B，36 层 / 8 个 KV 头），4096 约占 590MB 内存。GPU 模式下不生效 |
 
 ---
 
@@ -300,7 +320,8 @@ data: {"done": true, "model": "qwen3", "latency_ms": 8600}
 | 启动方式 | 命令 | 说明 |
 |----------|------|------|
 | 仅 Gateway | `docker compose up -d` | Mock 模式，单容器 |
-| 全部服务 | `docker compose --profile full up -d` | 包含所有模型服务 |
+| 全部服务 | `docker compose --profile full up -d` | 包含所有模型服务（CPU） |
+| 全部服务 + GPU | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile full up -d` | 同上，但 NLP 走 CUDA 加速 |
 
 ---
 
@@ -319,6 +340,7 @@ chmod +x scripts/demo.sh
 ```
 local-ai-swiss-army/
 ├── docker-compose.yml          # 容器编排
+├── docker-compose.gpu.yml      # GPU 覆盖层（可选，把 nlp 换成 CUDA 镜像）
 ├── .env.example                # 环境变量模板
 ├── .gitignore
 ├── README.md                   # 本文档
@@ -334,7 +356,7 @@ local-ai-swiss-army/
 ├── services/                   # 3 个模型服务
 │   ├── asr/                    # 语音识别 (faster-whisper)
 │   ├── tts/                    # 语音合成 (piper)
-│   └── nlp/                    # 文本AI (llama-cpp-python)
+│   └── nlp/                    # 文本AI (CPU 走 llama-cpp-python；GPU 模式被覆盖层替换)
 ├── web/
 │   └── index.html              # Web 面板（单文件 SPA）
 └── scripts/

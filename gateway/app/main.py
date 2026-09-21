@@ -33,7 +33,7 @@ def _init_adapters():
         "asr": ASRAdapter(s.asr_url, s.local_ai_mock),
         "translate": TranslateAdapter(s.mtran_url, s.local_ai_mock),
         "tts": TTSAdapter(s.tts_url, s.local_ai_mock),
-        "nlp": NLPAdapter(s.nlp_url, s.local_ai_mock),
+        "nlp": NLPAdapter(s.nlp_url, s.local_ai_mock, s.nlp_backend),
     }
 
 adapters = _init_adapters()
@@ -142,7 +142,7 @@ MODEL_REGISTRY = {
     "qwen3": {
         "name": "Qwen3-4B",
         "category": "nlp",
-        "desc": "通义千问 4B（中文强，纯 CPU 约 7 tok/s）",
+        "desc": "通义千问 4B（中文强；CPU 约 7 tok/s，GPU 约 19 tok/s）",
         "files": ["models/nlp/qwen3-4b-instruct-2507-q4_k_m.gguf"],
         "url": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
         # 实际 2497281120 字节（十进制 2497 MB）。前端直接把此值显示给用户，故用十进制

@@ -10,6 +10,8 @@ services:
       - NLP_URL=http://nlp:8005
       - MTRAN_URL=http://mtran:8989
       - LOCAL_AI_MOCK=${LOCAL_AI_MOCK:-auto}
+      # 默认 CPU 后端；docker-compose.gpu.yml 覆盖为 openai
+      - NLP_BACKEND=${NLP_BACKEND:-llamacpp}
       # 模型管理页的下载源（海外可改 .env 里的 HF_ENDPOINT 切回 huggingface.co）
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
