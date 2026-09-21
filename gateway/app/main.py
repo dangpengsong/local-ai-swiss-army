@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .config import get_settings
@@ -473,6 +473,20 @@ async def tts_infer(req: InferRequest):
 @app.post("/nlp")
 async def nlp_infer(req: InferRequest):
     return await adapters["nlp"].infer(req.input, req.model, req.params)
+
+@app.post("/nlp/stream")
+async def nlp_stream(req: InferRequest):
+    """流式 NLP（SSE）
+
+    与 /nlp 并存而非替换：语音管线、自定义管线都要拿到完整文本才能喂给下一步，
+    /nlp 的 JSON 契约保持不变。
+    """
+    return StreamingResponse(
+        adapters["nlp"].stream(req.input, req.model, req.params),
+        media_type="text/event-stream",
+        # X-Accel-Buffering: 防止将来挂 nginx 时把 SSE 缓冲成一次性输出
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── 管线路由 ──

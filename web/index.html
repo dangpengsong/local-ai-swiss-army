@@ -780,6 +780,10 @@ async function runInfer(service) {
   }
 
   try {
+    if (service === 'nlp') {
+      await runNlpStream(input, model, params, outEl);
+      return;
+    }
     const resp = await fetch(BASE + '/' + service, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -793,6 +797,50 @@ async function runInfer(service) {
     btn.disabled = false;
     btn.innerHTML = btn.dataset.origHtml;
   }
+}
+
+// 流式渲染 NLP 输出。用 fetch + ReadableStream 而非 EventSource：
+// EventSource 只支持 GET，带不了 JSON 请求体。
+async function runNlpStream(input, model, params, outEl) {
+  const resp = await fetch(BASE + '/nlp/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input, model, params: Object.keys(params).length ? params : undefined })
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '', text = '', meta = null;
+
+  outEl.textContent = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE 帧以空行分隔；末尾不完整的那段留在 buf 里等下一块
+      const frames = buf.split('\n\n');
+      buf = frames.pop();
+      for (const frame of frames) {
+        const line = frame.split('\n').find(l => l.startsWith('data:'));
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(5));
+        if (ev.error) throw new Error(ev.error);
+        if (ev.delta) { text += ev.delta; outEl.textContent = text; }
+        if (ev.done) meta = ev;
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  const badge = document.getElementById('nlp-badge');
+  badge.className = 'result-badge ' + (meta && meta.mock ? 'badge-mock' : 'badge-real');
+  badge.textContent = meta && meta.mock ? '模拟' : '真实';
+  badge.style.background = ''; badge.style.color = '';
+  document.getElementById('nlp-meta-model').innerHTML = '模型: <b>' + model + '</b>';
+  document.getElementById('nlp-meta-latency').innerHTML = '耗时: <b>' + ((meta && meta.latency_ms) || '-') + 'ms</b>';
 }
 
 function showResult(service, data) {

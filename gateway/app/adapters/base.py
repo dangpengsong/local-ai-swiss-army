@@ -79,6 +79,22 @@ class BaseServiceAdapter(ABC):
                 result.setdefault("mock", False)
             return result
 
+    async def stream_service(self, payload: dict):
+        """流式调用真实模型服务，逐帧转发 SSE
+
+        与 call_service 的区别是全程不缓冲：用 client.stream 边收边发，
+        等整个响应体到齐再返回就失去流式的意义了。
+        """
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST", f"{self.service_url}/infer/stream", json=payload
+            ) as resp:
+                resp.raise_for_status()
+                # aiter_lines 按行切分，SSE 帧的空行会变成空字符串；这里重新组装成帧
+                async for line in resp.aiter_lines():
+                    if line.strip():
+                        yield line + "\n\n"
+
     @abstractmethod
     async def infer(self, input_data: str, model: str = "", params: dict = None) -> dict:
         """执行推理，子类必须实现"""

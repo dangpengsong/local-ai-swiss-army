@@ -1,11 +1,14 @@
 """NLP 模型服务 — Qwen3-4B / Qwen2.5-0.5B / SmolLM2（via llama-cpp-python）"""
 
+import asyncio
+import json
 import os
 import time
 import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,10 @@ N_THREADS = int(os.environ.get("NLP_N_THREADS") or _default_threads())
 N_CTX = int(os.environ.get("NLP_N_CTX") or 4096)
 
 _loaded_models: dict = {}
+
+# Llama 不是线程安全的。流式推理走 executor 线程后，两个并发请求会同时进入同一个
+# Llama 实例，导致崩溃或输出串台。CPU 推理本就 ~7 tok/s，并发没有收益，直接串行化。
+_infer_lock = asyncio.Lock()
 
 
 def _model_weight_exists(model_id: str) -> bool:
@@ -133,3 +140,91 @@ async def infer(req: InferRequest):
         }
 
     return {"output": output, "model": req.model, "latency_ms": int((time.time() - start) * 1000)}
+
+
+# ── 流式推理 ──
+
+def _sse(obj: dict) -> str:
+    """SSE 帧。json.dumps 会把文本里的换行转义成 \\n 两个字符，
+    不会在 data: 行里留下裸换行（裸换行会截断 SSE 帧）"""
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+def _run_stream(llm, messages, loop, queue):
+    """在 executor 线程里消费阻塞生成器，逐块投递到 asyncio 队列
+
+    create_chat_completion(stream=True) 返回同步生成器，直接在 async 路由里迭代会
+    占住事件循环，期间 /health 不响应 —— gateway 每 30 秒探一次（超时 2 秒），
+    超时即判定服务不可用，降级 Mock 并让面板变红。
+    """
+    try:
+        for chunk in llm.create_chat_completion(
+            messages=messages, max_tokens=512, temperature=0.7, stream=True,
+        ):
+            delta = chunk["choices"][0]["delta"].get("content", "")
+            if delta:
+                loop.call_soon_threadsafe(queue.put_nowait, ("delta", delta))
+    except Exception as e:
+        loop.call_soon_threadsafe(queue.put_nowait, ("error", str(e)))
+    finally:
+        loop.call_soon_threadsafe(queue.put_nowait, None)  # 结束哨兵
+
+
+async def _error_stream(message: str):
+    yield _sse({"error": message})
+
+
+@app.post("/infer/stream")
+async def infer_stream(req: InferRequest):
+    """流式推理。与 /infer 并存：管线（voice/custom）需要完整文本才能喂给下一步"""
+    params = req.params or {}
+    task = params.get("task", "chat")
+    start = time.time()
+
+    if not _model_weight_exists(req.model):
+        return StreamingResponse(
+            _error_stream(f"模型 {req.model} 权重未找到，请先下载到 /models/"),
+            media_type="text/event-stream",
+        )
+
+    llm = get_model(req.model)
+    if llm is None:
+        return StreamingResponse(
+            _error_stream(f"模型 {req.model} 加载失败"),
+            media_type="text/event-stream",
+        )
+
+    prompt_template = TASK_PROMPTS.get(task, TASK_PROMPTS["chat"])
+    messages = [
+        {"role": "system", "content": "你是一个有用的AI助手，请用中文回答。"},
+        {"role": "user", "content": prompt_template.format(input=req.input)},
+    ]
+
+    async def gen():
+        async with _infer_lock:
+            queue: asyncio.Queue = asyncio.Queue()
+            loop = asyncio.get_running_loop()
+            future = loop.run_in_executor(None, _run_stream, llm, messages, loop, queue)
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    kind, value = item
+                    if kind == "error":
+                        yield _sse({"error": f"推理失败: {value}"})
+                        return
+                    yield _sse({"delta": value})
+                yield _sse({
+                    "done": True,
+                    "model": req.model,
+                    "latency_ms": int((time.time() - start) * 1000),
+                })
+            finally:
+                # 客户端中途断开时生成器被关闭（GeneratorExit），但 executor 里的
+                # llama.cpp 仍在生成 —— 它无从感知连接已断。必须等线程真正结束再放锁，
+                # 否则下一个请求会并发进入同一个 Llama 实例（非线程安全）。
+                # _run_stream 内部已捕获全部异常并经队列投递，future 不会抛。
+                await future
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

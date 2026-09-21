@@ -228,6 +228,7 @@ docker compose up -d --no-build mtran
 | `POST` | `/translate` | 翻译 |
 | `POST` | `/tts` | 语音合成 |
 | `POST` | `/nlp` | 文本 AI |
+| `POST` | `/nlp/stream` | 文本 AI（流式 SSE） |
 | `POST` | `/pipeline/voice` | 语音管线 |
 | `POST` | `/pipeline/custom` | 自定义管线 |
 
@@ -237,7 +238,7 @@ docker compose up -d --no-build mtran
 # 单模型推理
 curl -X POST http://localhost:8000/nlp \
   -H "Content-Type: application/json" \
-  -d '{"input": "介绍一下你自己", "model": "qwen", "params": {"task": "chat"}}'
+  -d '{"input": "介绍一下你自己", "model": "qwen3", "params": {"task": "chat"}}'
 
 # 翻译
 curl -X POST http://localhost:8000/translate \
@@ -255,10 +256,35 @@ curl -X POST http://localhost:8000/pipeline/custom \
 ```json
 {
   "output": "识别/翻译/推理结果",
-  "model": "qwen",
+  "model": "qwen3",
   "latency_ms": 123
 }
 ```
+
+### 流式输出（SSE）
+
+`/nlp/stream` 是 `/nlp` 的流式版本，逐 token 推送。实测首 token 从十余秒降到 0.15 秒
+（4B 模型纯 CPU 约 7 tok/s，等完整结果出来要 8 秒以上）。
+
+```bash
+curl -N -X POST http://localhost:8000/nlp/stream \
+  -H "Content-Type: application/json" \
+  -d '{"input": "介绍一下你自己", "model": "qwen3"}'
+```
+
+```
+data: {"delta": "杭州"}
+
+data: {"delta": "是"}
+
+data: {"done": true, "model": "qwen3", "latency_ms": 8600}
+```
+
+错误也走流内（`data: {"error": "..."}`）：HTTP 200 在第一个 token 时就已发出，
+之后无法再改状态码。`Mock` 模式同样逐字推送，不会让前端停在加载态。
+
+> 管线（`/pipeline/voice`、`/pipeline/custom`）仍走非流式 —— 下一步需要完整文本才能开始。
+> 推理本身是串行的（同一个模型实例不能并发），流式不会让两个请求同时生成。
 
 ---
 
