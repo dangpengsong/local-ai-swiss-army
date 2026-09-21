@@ -88,6 +88,15 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    # 镜像自带的 healthcheck 写死 http://localhost:8080/health，而本项目跑在 8005，
+    # 不覆盖的话容器永远显示 unhealthy —— 功能其实是正常的，只是状态误导
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # 冷启动要读 2.3GB 权重并塞进显存，给足缓冲，免得启动期就被判失败
+      start_period: 60s
     restart: unless-stopped
 
   # MTranServer 独立翻译服务（自带 /imme 端点，可直接对接沉浸式翻译）
