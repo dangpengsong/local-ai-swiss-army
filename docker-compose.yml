@@ -14,6 +14,8 @@ services:
       - NLP_TOOLS=${NLP_TOOLS:-true}
       # 让「现在几点」和日志时间戳都用本地时区；容器默认是 UTC，会差 8 小时
       - TZ=${TZ:-Asia/Shanghai}
+      # 对外 OpenAI 兼容接口（/v1/*）的 API Key，留空则不校验
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # 模型管理页的下载源（海外可改 .env 里的 HF_ENDPOINT 切回 huggingface.co）
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:

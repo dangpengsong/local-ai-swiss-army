@@ -15,6 +15,7 @@ from .adapters.asr import ASRAdapter
 from .adapters.translate import TranslateAdapter
 from .adapters.tts import TTSAdapter
 from .adapters.nlp import NLPAdapter
+from .openai_api import router as openai_router
 from .pipelines.registry import get_pipeline, list_pipelines
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,10 @@ app = FastAPI(
     description="本地小模型全栈 Demo — 12 模型 / 4 类 / Mock 优先",
     version="0.1.0",
 )
+
+# 对外 OpenAI 兼容接口（/v1/models、/v1/chat/completions），
+# 供 Cherry Studio 等外部客户端接入，见 openai_api.py
+app.include_router(openai_router)
 
 # ── 适配器实例 ──
 

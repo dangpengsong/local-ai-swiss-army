@@ -41,7 +41,7 @@ async def voice_pipeline(
     # 关掉工具：这条管线后面直接取 result["output"] 链式往下传，而工具调用会
     # 让这一步多花几秒（多轮推理），且语音场景下「顺便联网查一下」没有意义
     nlp_model = params.get("nlp_model", "qwen3")
-    nlp_params = {"task": params.get("nlp_task", "chat"), "tools": False}
+    nlp_params = {"tools": False}
     nlp_result = await nlp_adapter.infer(text, model=nlp_model, params=nlp_params)
     steps.append({"step": "nlp", "model": nlp_model, "result": nlp_result})
     nlp_text = nlp_result.get("output", text)

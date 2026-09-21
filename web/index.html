@@ -186,13 +186,13 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
       语音识别
     </button>
-    <button onclick="switchTab('translate',this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
-      翻译
-    </button>
     <button onclick="switchTab('tts',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
       语音合成
+    </button>
+    <button onclick="switchTab('translate',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+      翻译
     </button>
     <button onclick="switchTab('nlp',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -435,14 +435,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           <option value="qwen3">Qwen3-4B</option>
         </select>
       </div>
-      <div class="field">
-        <div class="field-label">任务类型</div>
-        <select id="nlp-task">
-          <option value="chat">对话问答</option>
-          <option value="summarize">文本摘要</option>
-          <option value="classify">文本分类</option>
-        </select>
-      </div>
     </div>
 
     <button class="btn btn-primary" id="nlp-btn" onclick="runInfer('nlp')">
@@ -456,7 +448,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="result-meta">
           <span id="nlp-meta-model"></span>
           <span id="nlp-meta-latency"></span>
-          <span id="nlp-meta-task"></span>
         </div>
       </div>
       <!-- 工具调用轨迹。必须放在 #nlp-output 之外：输出区是整体重写的
@@ -758,9 +749,6 @@ async function runInfer(service) {
   if (service === 'translate') {
     params.source = document.getElementById('translate-source').value;
     params.target = document.getElementById('translate-target').value;
-  }
-  if (service === 'nlp') {
-    params.task = document.getElementById('nlp-task').value;
   }
   if (service === 'asr') {
     const lang = document.getElementById('asr-lang').value;
@@ -1293,6 +1281,22 @@ async function pollModels() {
     renderModels(data.models);
   } catch(e) {}
 }
+
+// ===== Ctrl+Enter / ⌘+Enter 触发输入框所属的主按钮 =====
+// 绑在输入框上而不是 document：这样在模型页、下拉框等处按不会误触发。
+// 按钮禁用时（正在跑）不响应，避免重复提交。
+document.querySelectorAll('.tab-content textarea').forEach(el => {
+  el.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    // 取「输入框之后」的第一个主按钮，而不是容器里的第一个：ASR 页的「录音」
+    // 按钮排在输入框前面，管线页一个页签里有两张卡片各带一个主按钮 —— 只按
+    // 容器取第一个，前者会按成录音、后者会执行错的那条管线。
+    const btn = [...el.closest('.tab-content').querySelectorAll('.btn-primary')]
+      .find(b => el.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    if (btn && !btn.disabled) btn.click();
+  });
+});
 
 // ===== 初始化 =====
 loadStatus();

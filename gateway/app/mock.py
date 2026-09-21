@@ -23,11 +23,7 @@ MOCK_TRANSLATE_TEXTS = {
 # 静音 WAV（前端另有"模拟：生成一段静音"提示）
 MOCK_TTS_AUDIO_B64 = "UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="
 
-MOCK_NLP_RESPONSES = {
-    "chat": "这是一个本地语言模型的回复，实际运行时将调用 Qwen3-4B 模型。",
-    "summarize": "摘要：本文介绍了本地部署小模型的方案。",
-    "classify": "分类结果：技术文档（置信度 0.95）",
-}
+MOCK_NLP_TEXT = "这是一个本地语言模型的回复，实际运行时将调用 Qwen3-4B 模型。"
 
 
 def mock_asr(model: str = "whisper") -> dict:
@@ -60,9 +56,9 @@ def mock_tts(model: str = "piper") -> dict:
     }
 
 
-def mock_nlp(model: str = "qwen3", task: str = "chat") -> dict:
+def mock_nlp(model: str = "qwen3") -> dict:
     return {
-        "output": MOCK_TAG + MOCK_NLP_RESPONSES.get(task, MOCK_NLP_RESPONSES["chat"]),
+        "output": MOCK_TAG + MOCK_NLP_TEXT,
         "model": model,
         "mock": True,
         "latency_ms": random.randint(200, 500),

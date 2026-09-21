@@ -7,6 +7,11 @@
 工具调用（function calling）的循环放在 gateway 而不是服务端：官方 server
 不可能跑我们的循环；而且循环落在这里，将来换任何 OpenAI 兼容后端都不用重写。
 
+对外有两组入口，共用同一个工具循环内核（run_tools）：
+  infer / stream —— 项目自有格式，网页面板和管线用
+  chat / chat_stream —— OpenAI 格式，Cherry Studio 这类外部客户端接入用
+循环只有一份，工具行为才处处一致；分开写迟早漂。
+
 一条实测得来的约束：流式 tool_calls 是标准 OpenAI 分片格式 —— 第一片带
 id/type/function.name，后续片只有 function.arguments 的碎片，单独看任何一片
 都不是合法 JSON，必须按 index 归并、拼完再解析。
@@ -15,6 +20,7 @@ id/type/function.name，后续片只有 function.arguments 的碎片，单独看
 import asyncio
 import json
 import time
+import uuid
 
 import httpx
 import logging
@@ -27,16 +33,13 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_MODELS = ["qwen3"]
 
-# 与 GGUF 内嵌的 Qwen3 模板配合使用。模板与采样参数在 gateway 侧展开，
-# 而不是留给服务端：官方 llama.cpp server 没有 task 这个概念。
 SYSTEM_PROMPT = "你是一个有用的AI助手，请用中文回答。"
-TASK_PROMPTS = {
-    "chat": "{input}",
-    "summarize": "请用简洁的中文总结以下内容：\n\n{input}\n\n摘要：",
-    "classify": "请对以下文本进行分类，只返回分类名称：\n\n{input}\n\n分类：",
-}
+
 MAX_TOKENS = 512
 TEMPERATURE = 0.7
+
+# 外部客户端可以自带 max_tokens，但要封顶：上下文只有 4096，放开会被打爆
+MAX_TOKENS_CAP = 2048
 
 # 工具循环最多几轮。4B 模型偶尔会固执地反复调同一个工具，到顶后改用
 # 不带工具的请求强制收尾，避免无限循环。
@@ -49,6 +52,16 @@ ROUND_TIMEOUT = 300.0
 
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+def _ensure_system(messages: list) -> list:
+    """客户端没给 system 就补一个。
+
+    Qwen3 裸跑（完全没有 system）时对话格式会漂，而外部接入方不一定带 system。
+    """
+    if any(m.get("role") == "system" for m in messages):
+        return messages
+    return [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
 
 
 def _merge_tool_call(acc: dict, frag: dict) -> None:
@@ -83,34 +96,6 @@ def _finalize(acc: dict) -> list:
     return out
 
 
-def _normalize_calls(raw: list | None) -> list:
-    """归一化非流式的 tool_calls（它本来就是完整的，不需要分片归并）
-
-    arguments 按 OpenAI 标准是字符串；这里也接住 dict，免得服务端版本换了个
-    行为就让整个工具功能挂掉。
-    """
-    out = []
-    for i, call in enumerate(raw or []):
-        fn = call.get("function") or {}
-        raw_args = fn.get("arguments")
-        if isinstance(raw_args, dict):
-            args = raw_args
-            raw_args = json.dumps(raw_args, ensure_ascii=False)
-        else:
-            raw_args = raw_args or ""
-            try:
-                args = json.loads(raw_args.strip()) if raw_args.strip() else {}
-            except json.JSONDecodeError:
-                args = None
-        out.append({
-            "id": call.get("id") or f"call_{i}",
-            "name": fn.get("name") or "",
-            "arguments": raw_args,
-            "args": args,
-        })
-    return out
-
-
 class NLPAdapter(BaseServiceAdapter):
     def __init__(self, service_url: str, mock_mode: str = "auto",
                  tools_enabled: bool = True):
@@ -118,16 +103,12 @@ class NLPAdapter(BaseServiceAdapter):
         self.tools_enabled = tools_enabled
 
     def _with_messages(self, input_data: str, params: dict) -> dict:
-        """把 task 模板展开成 messages 一并放进 params；调用方已给就不覆盖"""
+        """把输入包成 messages 一并放进 params；调用方已给就不覆盖"""
         if params.get("messages"):
             return params
-        template = TASK_PROMPTS.get(params.get("task", "chat"), TASK_PROMPTS["chat"])
         return {
             **params,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": template.format(input=input_data)},
-            ],
+            "messages": _ensure_system([{"role": "user", "content": input_data}]),
         }
 
     def _tools_on(self, params: dict) -> bool:
@@ -136,97 +117,144 @@ class NLPAdapter(BaseServiceAdapter):
             return False
         return bool(params.get("tools", True))
 
-    def _payload(self, messages: list, tools: list | None, stream: bool) -> dict:
+    def _payload(self, messages: list, tools: list | None, stream: bool,
+                 max_tokens: int | None = None,
+                 temperature: float | None = None) -> dict:
         body = {
             "messages": messages,
-            "max_tokens": MAX_TOKENS,
-            "temperature": TEMPERATURE,
+            "max_tokens": max_tokens or MAX_TOKENS,
+            "temperature": TEMPERATURE if temperature is None else temperature,
         }
         if stream:
             body["stream"] = True
+            # 和 OpenAI 一样，llama.cpp 默认不在流里发用量 —— 不显式要这一帧，
+            # 客户端拿到的 token 数会一直是 0
+            body["stream_options"] = {"include_usage": True}
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
         return body
 
-    # ── 非流式 ──
+    # ── 工具循环内核（两个渲染层共用）──
 
-    async def infer(self, input_data: str, model: str = "qwen3", params: dict = None) -> dict:
-        params = params or {}
-        task = params.get("task", "chat")
+    async def run_tools(self, messages: list, tools_on: bool = True,
+                        max_tokens: int | None = None,
+                        temperature: float | None = None):
+        """跑完整个工具循环，产出结构化事件。
 
-        # gateway 的 InferRequest.model 默认是空串，会覆盖签名上的默认值；
-        # 不传 model 时落到该服务的首选模型
-        model = model or SUPPORTED_MODELS[0]
+          ("delta", text)                模型输出增量
+          ("tool_start", call)           开始执行某个工具
+          ("tool_end", (call, res, ms))  工具执行完毕
+          ("done", {...})                循环结束，带 content / trace / usage
 
-        if model not in SUPPORTED_MODELS:
-            return {"error": f"不支持的模型: {model}，可选: {SUPPORTED_MODELS}"}
-
-        if self.should_mock():
-            return mock_nlp(model, task)
-
-        params = self._with_messages(input_data, params)
-        tools_on = self._tools_on(params)
-        start = time.time()
-        messages = list(params["messages"])
+        messages 会被就地追加（assistant 轮与 tool 结果），调用方传进来的是副本。
+        """
         trace: list = []
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        content = ""
+        finish = "stop"
 
         for round_no in range(MAX_TOOL_ROUNDS + 1):
+            # 最后一轮去掉 tools：模型不可能再要求调用，只能基于已有信息作答
             tools = TOOL_SPECS if (tools_on and round_no < MAX_TOOL_ROUNDS) else None
-            try:
-                result = await self._call_round(messages, tools)
-            except Exception as e:
-                logger.error(f"NLP 推理失败: {e}")
-                # 走 error 字段：带 output 返回会被前端当作"真实推理结果"显示绿色徽章
-                return {
-                    "error": f"推理失败: {e}",
-                    "model": model,
-                    "latency_ms": int((time.time() - start) * 1000),
-                }
+            result = None
+            async for kind, payload in self._stream_round(
+                    messages, tools, max_tokens, temperature):
+                if kind == "delta":
+                    yield ("delta", payload)
+                else:
+                    result = payload
+
+            content = result["content"]
+            finish = result.get("finish_reason") or "stop"
+            if result.get("usage"):
+                for k in usage:
+                    # 多轮要累加而不是取最后：每轮都重发完整 prompt，那些 prefill
+                    # 是实打实算过的，客户端看到的 token 数应当反映真实消耗
+                    usage[k] += result["usage"].get(k) or 0
 
             calls = result["tool_calls"]
             if not calls:
-                out = {
-                    "output": result["content"].strip(),
-                    "model": model,
-                    "mock": False,
-                    "latency_ms": int((time.time() - start) * 1000),
-                }
-                if trace:
-                    out["tool_calls"] = trace
-                return out
+                break
 
-            messages.append(self._assistant_message(result["content"], calls))
+            # 先广播全部 start 再并行执行：一轮里有多个工具时，前端能同时
+            # 看到它们"运行中"，而不是一个一个排队亮起
+            for call in calls:
+                yield ("tool_start", call)
+
+            messages.append(self._assistant_message(content, calls))
             for call, res, ms in await self._run_calls(calls):
+                yield ("tool_end", (call, res, ms))
                 trace.append({
                     "name": call["name"], "args": call["args"],
                     "ok": res["ok"], "detail": res["detail"], "ms": ms,
                 })
+                # 工具失败也照常回填：实测模型会基于错误信息如实说明，
+                # 而不是编一个结果，所以没有理由中断这一轮
                 messages.append({
                     "role": "tool", "tool_call_id": call["id"], "content": res["content"],
                 })
+        else:
+            # 理论到不了这里：最后一轮不带 tools，模型无法再要求调用
+            logger.warning("工具循环跑满仍未收敛，按当前内容收尾")
 
-        # MAX_TOOL_ROUNDS + 1 轮之后 tools 恒为 None，模型不可能再要求调用，
-        # 所以走不到这里；真走到了说明逻辑有变，如实报错而不是假装成功。
-        return {
-            "error": "工具调用轮次超出预期",
-            "model": model,
-            "latency_ms": int((time.time() - start) * 1000),
-        }
+        yield ("done", {
+            "content": content, "trace": trace, "usage": usage, "finish_reason": finish,
+        })
 
-    async def _call_round(self, messages: list, tools: list | None) -> dict:
+    async def _stream_round(self, messages: list, tools: list | None,
+                            max_tokens: int | None = None,
+                            temperature: float | None = None):
+        """一轮请求。产出 ("delta", 文本) 流与末尾的 ("result", {...})。
+
+        即使调用方要的是非流式结果也走流式请求：循环里的每一轮都要能边收边发，
+        否则就得维护两套解析逻辑。llama.cpp 两种模式的采样结果一致。
+        """
+        acc: dict = {}
+        parts: list[str] = []
+        usage = None
+        finish = None
         async with httpx.AsyncClient(timeout=ROUND_TIMEOUT) as client:
-            resp = await client.post(
+            async with client.stream(
+                "POST",
                 f"{self.service_url}/v1/chat/completions",
-                json=self._payload(messages, tools, stream=False),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        message = data["choices"][0]["message"]
-        return {
-            "content": message.get("content") or "",
-            "tool_calls": _normalize_calls(message.get("tool_calls")),
-        }
+                json=self._payload(messages, tools, True, max_tokens, temperature),
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    # 流里夹杂空行和注释行，只认 data: 帧
+                    if not line.startswith("data: "):
+                        continue
+                    body = line[6:]
+                    if body == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(body)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    choices = chunk.get("choices") or []
+                    # usage 帧的 choices 是空数组，不能直接取 [0]
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    if choice.get("finish_reason"):
+                        finish = choice["finish_reason"]
+                    delta = choice.get("delta") or {}
+                    text = delta.get("content")
+                    if text:
+                        parts.append(text)
+                        yield ("delta", text)
+                    for frag in delta.get("tool_calls") or []:
+                        _merge_tool_call(acc, frag)
+        yield ("result", {
+            "content": "".join(parts),
+            "tool_calls": _finalize(acc),
+            "usage": usage,
+            "finish_reason": finish,
+        })
 
     @staticmethod
     def _assistant_message(content: str, calls: list) -> dict:
@@ -270,88 +298,91 @@ class NLPAdapter(BaseServiceAdapter):
 
         return await asyncio.gather(*(run_one(c) for c in calls))
 
-    # ── 流式 ──
+    # ── 入口 1：项目自有格式（网页面板 + 管线）──
+
+    def _resolve_model(self, model: str) -> str | None:
+        """空 model 落到首选模型；不支持则返回 None"""
+        model = model or SUPPORTED_MODELS[0]
+        return model if model in SUPPORTED_MODELS else None
+
+    async def infer(self, input_data: str, model: str = "qwen3", params: dict = None) -> dict:
+        params = params or {}
+        model = self._resolve_model(model)
+        if model is None:
+            return {"error": f"不支持的模型: {params.get('model') or ''}，可选: {SUPPORTED_MODELS}"}
+
+        if self.should_mock():
+            return mock_nlp(model)
+
+        params = self._with_messages(input_data, params)
+        started = time.time()
+        out = None
+        try:
+            async for kind, payload in self.run_tools(
+                    list(params["messages"]), self._tools_on(params)):
+                if kind == "done":
+                    out = payload
+        except Exception as e:
+            logger.error(f"NLP 推理失败: {e}")
+            # 走 error 字段：带 output 返回会被前端当作"真实推理结果"显示绿色徽章
+            return {
+                "error": f"推理失败: {e}",
+                "model": model,
+                "latency_ms": int((time.time() - started) * 1000),
+            }
+
+        result = {
+            "output": out["content"].strip(),
+            "model": model,
+            "mock": False,
+            "latency_ms": int((time.time() - started) * 1000),
+        }
+        if out["trace"]:
+            result["tool_calls"] = out["trace"]
+        return result
 
     async def stream(self, input_data: str, model: str = "qwen3", params: dict = None):
-        """流式推理，产出 SSE 帧
+        """流式推理，产出项目自有 SSE 帧
 
         错误也走流内：HTTP 200 在第一个 token 时就已经发出，之后无法再改状态码，
         只能推一个 error 事件让前端识别。
         """
         params = params or {}
-        task = params.get("task", "chat")
-
-        # 同 infer：空 model 落到首选模型
-        model = model or SUPPORTED_MODELS[0]
-
-        if model not in SUPPORTED_MODELS:
-            yield _sse({"error": f"不支持的模型: {model}，可选: {SUPPORTED_MODELS}"})
+        model = self._resolve_model(model)
+        if model is None:
+            yield _sse({"error": f"不支持的模型: {params.get('model') or ''}，可选: {SUPPORTED_MODELS}"})
             return
 
         if self.should_mock():
             # mock 也必须逐字吐：否则前端要一直停在 loading 等完整结果，
             # 开了 Mock 反而比非流式更迷惑
-            for ch in mock_nlp(model, task)["output"]:
+            for ch in mock_nlp(model)["output"]:
                 yield _sse({"delta": ch})
                 await asyncio.sleep(0.02)
             yield _sse({"done": True, "mock": True, "model": model})
             return
 
         params = self._with_messages(input_data, params)
-        async for frame in self._stream_chat(model, params):
-            yield frame
-
-    async def _stream_chat(self, model: str, params: dict):
-        """工具循环 + 流式输出的主控
-
-        全程真流式：模型不需要工具时，content 边生成边推，首 token 延迟与
-        没有工具的请求完全一致（实测 142ms）。需要工具时，本轮先推完模型
-        说的话（通常是「我来查一下」），再执行工具、回填、进入下一轮。
-        """
         started = time.time()
-        messages = list(params["messages"])
-        tools_on = self._tools_on(params)
         trace: list = []
-
         try:
-            for round_no in range(MAX_TOOL_ROUNDS + 1):
-                tools = TOOL_SPECS if (tools_on and round_no < MAX_TOOL_ROUNDS) else None
-                result = None
-
-                async for kind, payload in self._stream_round(messages, tools):
-                    if kind == "delta":
-                        yield _sse({"delta": payload})
-                    else:
-                        result = payload
-
-                calls = result["tool_calls"]
-                if not calls:
-                    break     # 没有工具调用 → 刚推完的 content 就是最终答案
-
-                # 先广播全部 start 再并行执行：一轮里有多个工具时，前端能同时
-                # 看到它们"运行中"，而不是一个一个排队亮起
-                for call in calls:
+            async for kind, payload in self.run_tools(
+                    list(params["messages"]), self._tools_on(params)):
+                if kind == "delta":
+                    yield _sse({"delta": payload})
+                elif kind == "tool_start":
                     yield _sse({"tool": {
-                        "id": call["id"], "name": call["name"],
-                        "phase": "start", "args": call["args"],
+                        "id": payload["id"], "name": payload["name"],
+                        "phase": "start", "args": payload["args"],
                     }})
-
-                messages.append(self._assistant_message(result["content"], calls))
-                for call, res, ms in await self._run_calls(calls):
+                elif kind == "tool_end":
+                    call, res, ms = payload
                     yield _sse({"tool": {
                         "id": call["id"], "phase": "end",
                         "ok": res["ok"], "detail": res["detail"], "ms": ms,
                     }})
-                    trace.append({
-                        "name": call["name"], "args": call["args"],
-                        "ok": res["ok"], "detail": res["detail"], "ms": ms,
-                    })
-                    # 工具失败也照常回填：实测模型会基于错误信息如实说明，
-                    # 而不是编一个结果，所以没有理由中断这一轮
-                    messages.append({
-                        "role": "tool", "tool_call_id": call["id"], "content": res["content"],
-                    })
-
+                elif kind == "done":
+                    trace = payload["trace"]
         except Exception as e:
             logger.error(f"NLP 流式推理失败: {e}")
             yield _sse({"error": f"推理失败: {e}"})
@@ -366,33 +397,94 @@ class NLPAdapter(BaseServiceAdapter):
             done["tool_calls"] = trace
         yield _sse(done)
 
-    async def _stream_round(self, messages: list, tools: list | None):
-        """一轮流式请求。产出 ("delta", 文本) 流与末尾的 ("result", {...})"""
-        acc: dict = {}
-        parts: list[str] = []
-        async with httpx.AsyncClient(timeout=ROUND_TIMEOUT) as client:
-            async with client.stream(
-                "POST",
-                f"{self.service_url}/v1/chat/completions",
-                json=self._payload(messages, tools, stream=True),
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    line = line.strip()
-                    # 流里夹杂空行和注释行，只认 data: 帧
-                    if not line.startswith("data: "):
-                        continue
-                    body = line[6:]
-                    if body == "[DONE]":
-                        break
-                    try:
-                        delta = json.loads(body)["choices"][0].get("delta") or {}
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
-                    text = delta.get("content")
-                    if text:
-                        parts.append(text)
-                        yield ("delta", text)
-                    for frag in delta.get("tool_calls") or []:
-                        _merge_tool_call(acc, frag)
-        yield ("result", {"content": "".join(parts), "tool_calls": _finalize(acc)})
+    # ── 入口 2：OpenAI 格式（Cherry Studio 等外部客户端接入）──
+
+    async def chat(self, messages: list, model: str = "qwen3",
+                   max_tokens: int | None = None,
+                   temperature: float | None = None,
+                   tools_on: bool = True) -> dict:
+        """非流式对话，返回 OpenAI chat.completion 结构"""
+        model = self._resolve_model(model) or SUPPORTED_MODELS[0]
+        started = time.time()
+        messages = _ensure_system([dict(m) for m in messages])
+
+        if self.should_mock():
+            text, trace, usage, finish = mock_nlp(model)["output"], [], None, "stop"
+        else:
+            text, trace, usage, finish = "", [], None, "stop"
+            async for kind, payload in self.run_tools(
+                    messages, tools_on and self.tools_enabled,
+                    max_tokens, temperature):
+                if kind == "done":
+                    text = payload["content"]
+                    trace = payload["trace"]
+                    usage = payload["usage"]
+                    finish = payload["finish_reason"]
+
+        return {
+            "id": "chatcmpl-" + uuid.uuid4().hex,
+            "object": "chat.completion",
+            "created": int(started),
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                # 透传真实原因：被 max_tokens 截断时是 length，客户端据此提示用户
+                "finish_reason": finish,
+            }],
+            "usage": usage or {
+                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            },
+            # 非标准字段：外部客户端会忽略，网页/调试时能看出用了哪些工具
+            "tool_calls_trace": trace,
+        }
+
+    async def chat_stream(self, messages: list, model: str = "qwen3",
+                          max_tokens: int | None = None,
+                          temperature: float | None = None,
+                          tools_on: bool = True):
+        """流式对话，产出 OpenAI SSE 帧（含结尾的 data: [DONE]）
+
+        工具调用的过程**不转发给客户端** —— 工具在服务端执行完，客户端只看到
+        最终的 content 流。这样任何 OpenAI 客户端都能直接用上联网/计算能力，
+        不需要它自己实现 function calling。
+        """
+        model = self._resolve_model(model) or SUPPORTED_MODELS[0]
+        cid = "chatcmpl-" + uuid.uuid4().hex
+        created = int(time.time())
+        messages = _ensure_system([dict(m) for m in messages])
+        usage = None
+        finish = "stop"
+
+        def frame(delta: dict, finish=None) -> str:
+            return "data: " + json.dumps({
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            }, ensure_ascii=False) + "\n\n"
+
+        # 首帧先发 role：OpenAI 客户端普遍据此建立消息气泡
+        yield frame({"role": "assistant", "content": ""})
+
+        if self.should_mock():
+            for ch in mock_nlp(model)["output"]:
+                yield frame({"content": ch})
+                await asyncio.sleep(0.02)
+        else:
+            async for kind, payload in self.run_tools(
+                    messages, tools_on and self.tools_enabled,
+                    max_tokens, temperature):
+                if kind == "delta":
+                    yield frame({"content": payload})
+                elif kind == "done":
+                    usage = payload["usage"]
+                    finish = payload["finish_reason"]
+
+        yield frame({}, finish=finish)
+        # 用量帧：choices 是空数组，这是 OpenAI 的规范形状
+        if usage:
+            yield "data: " + json.dumps({
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model, "choices": [], "usage": usage,
+            }, ensure_ascii=False) + "\n\n"
+        yield "data: [DONE]\n\n"

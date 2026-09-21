@@ -8,14 +8,16 @@
 ## 架构
 
 ```
-┌─────────────────────────────────────────────┐
-│             Web 面板 / CLI (curl)            │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
+┌──────────────────────────┬──────────────────┐
+│     Web 面板 / CLI       │ Cherry Studio 等 │
+│                          │  (OpenAI 协议)   │
+└──────────────┬───────────┴────────┬─────────┘
+               │                    │
+┌──────────────▼────────────────────▼─────────┐
 │          API Gateway (FastAPI) :8000         │
 │  /asr  /translate  /tts  /nlp               │
 │  /pipeline/voice                             │
+│  /v1/chat/completions  /v1/models  (对外)   │
 │  /models  (模型管理)                         │
 └──┬──────┬──────┬──────┬──────────────────────┘
    │      │      │      │
@@ -234,6 +236,8 @@ docker compose up -d --no-build mtran
 | `POST` | `/nlp/stream` | 文本 AI（流式 SSE） |
 | `POST` | `/pipeline/voice` | 语音管线 |
 | `POST` | `/pipeline/custom` | 自定义管线 |
+| `POST` | `/v1/chat/completions` | 对外 OpenAI 兼容对话，见[对外接入](#对外接入openai-兼容接口) |
+| `GET` | `/v1/models` | 对外模型列表 |
 
 ### 请求格式
 
@@ -241,7 +245,7 @@ docker compose up -d --no-build mtran
 # 单模型推理
 curl -X POST http://localhost:8000/nlp \
   -H "Content-Type: application/json" \
-  -d '{"input": "介绍一下你自己", "model": "qwen3", "params": {"task": "chat"}}'
+  -d '{"input": "介绍一下你自己", "model": "qwen3"}'
 
 # 翻译
 curl -X POST http://localhost:8000/translate \
@@ -338,6 +342,93 @@ NLP_TOOLS=false
 
 ---
 
+## 对外接入（OpenAI 兼容接口）
+
+文本 AI 额外暴露两个 OpenAI 兼容端点，Cherry Studio、Chatbox、NextChat、Open WebUI
+这类客户端可以直接对接：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/v1/models` | 模型列表 |
+| `POST` | `/v1/chat/completions` | 对话补全，支持 `stream: true/false` |
+
+### Cherry Studio 配置
+
+设置 → 模型服务 → 添加提供商（类型选 OpenAI）：
+
+| 配置项 | 值 |
+|--------|-----|
+| API 地址 | `http://localhost:8000/v1` |
+| API 密钥 | 随意填（未配 `OPENAI_API_KEY` 时不校验） |
+| 模型 ID | `qwen3` |
+
+点「检查连接」，列表里出现 `qwen3` 即可用。
+
+> 局域网内其他设备访问时，把 `localhost` 换成宿主机的 IP。
+
+### 和直接用 llama.cpp 端口的区别
+
+**工具在服务端执行完，客户端只看到 `content` 流。** 四个工具的循环跑在 gateway 里，
+客户端不需要自己实现 function calling —— 配好就能问「现在几点」「帮我算 1234×5678」。
+这是这层适配存在的主要理由，其余三点是次要修补：
+
+- `model` 字段返回 `qwen3`，而不是 llama.cpp 那边的文件路径
+  （`/models/qwen3-4b-instruct-2507-q4_k_m.gguf`）—— 不映射的话客户端会因
+  「返回的模型和请求的不一致」报错
+- 客户端没带 `system` 时补一个默认的，否则 Qwen3 裸跑会漂
+- 出错时返回 `{"error": {...}}` 而不是 FastAPI 默认的 `{"detail": ...}` ——
+  客户端普遍只认前者，后者会被显示成「未知错误」
+
+因此客户端自带的 `tools` 定义会被**忽略**：两套工具混在一起，会出现客户端收到
+`tool_calls` 却按自己的定义去执行的错配。
+
+### 实测行为
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3", "messages": [{"role": "user", "content": "现在几点了？"}]}'
+```
+
+```json
+{
+  "id": "chatcmpl-…",
+  "object": "chat.completion",
+  "model": "qwen3",
+  "choices": [{
+    "index": 0,
+    "message": {"role": "assistant", "content": "现在是2026年9月21日，星期一，17点23分48秒。"},
+    "finish_reason": "stop"
+  }],
+  "usage": {"prompt_tokens": 1187, "completion_tokens": 44, "total_tokens": 1231}
+}
+```
+
+几点值得留意：
+
+- `usage` 是多轮**累加值**。工具循环每一轮都要重发完整 prompt，那些 prefill 是实际
+  消耗掉的算力，客户端看到的 token 数应当反映真实成本
+- `max_tokens` 封顶 2048。上下文只有 4096，客户端默认值可能直接打爆
+  （llama.cpp 会静默截断 prompt，表现成「答非所问」）
+- 非流式响应多一个非标准字段 `tool_calls_trace`，客户端会忽略它，调试时能看到
+  这次用了哪些工具
+- 模型名只支持 `qwen3`。传别的返回 404 并列出可用模型，而不是静默回落 ——
+  回落会让配置错误变成一个难查的「怎么答得不对」
+
+### 暴露到局域网外
+
+默认不校验 API Key（本地私有部署，gateway 的其他接口本来也没有鉴权，
+单独给这一个加锁没有意义）。要往外暴露时：
+
+```bash
+# .env
+OPENAI_API_KEY=你的密钥
+```
+
+客户端 API 密钥栏填同一个值。留空即不校验。
+
+---
+
 ## 环境变量
 
 在 `.env` 文件中配置：
@@ -351,6 +442,7 @@ NLP_TOOLS=false
 | `MTRAN_URL` | `http://mtran:8989` | MTranServer 独立翻译容器地址 |
 | `NLP_TOOLS` | `true` | 文本 AI 的工具能力（function calling）总开关。详见[工具能力](#工具能力function-calling) |
 | `TZ` | `Asia/Shanghai` | 容器时区。不设的话「现在几点」会答错 8 小时 |
+| `OPENAI_API_KEY` | 空 | 对外 OpenAI 兼容接口（`/v1/*`）的 API Key。留空 = 不校验 |
 
 ---
 
@@ -388,6 +480,8 @@ local-ai-swiss-army/
 │       ├── main.py             # FastAPI 入口 + 全部路由 + 模型管理
 │       ├── config.py           # 配置管理
 │       ├── mock.py             # Mock 输出生成器
+│       ├── tools.py            # 工具集（时间/计算器/搜索/抓取），供工具循环调用
+│       ├── openai_api.py       # 对外 OpenAI 兼容接口（/v1/*）
 │       ├── adapters/           # 4 个模型适配器
 │       └── pipelines/          # 管线（语音/自定义）
 ├── services/                   # 2 个模型服务

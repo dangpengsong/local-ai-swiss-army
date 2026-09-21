@@ -94,7 +94,7 @@ echo ""
 echo "6️⃣ NLP 测试..."
 curl -s -X POST "$BASE_URL/nlp" \
   -H "Content-Type: application/json" \
-  -d '{"input": "介绍一下你自己", "model": "qwen3", "params": {"task": "chat"}}' | python3 -m json.tool
+  -d '{"input": "介绍一下你自己", "model": "qwen3"}' | python3 -m json.tool
 
 # 语音管线
 echo ""
