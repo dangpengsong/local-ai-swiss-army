@@ -46,9 +46,12 @@ async def voice_pipeline(
 
     # Step 3: Translate
     translate_model = params.get("translate_model", "mtran")
+    # 默认语向是 zh→en 而不是 en→zh：这条管线的输入来自中文语音（内置的中文 TTS 语音、
+    # 演示脚本用的都是中文），识别出的中文若按「英译中」送去翻译，只会得到一串乱码。
+    # 需要别的语向时用 params 的 translate_source / translate_target 覆盖。
     translate_params = {
-        "source": params.get("translate_source", "en"),
-        "target": params.get("translate_target", "zh"),
+        "source": params.get("translate_source", "zh"),
+        "target": params.get("translate_target", "en"),
     }
     translate_result = await translate_adapter.infer(
         nlp_text, model=translate_model, params=translate_params
