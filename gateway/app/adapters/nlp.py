@@ -35,11 +35,13 @@ SUPPORTED_MODELS = ["qwen3"]
 
 SYSTEM_PROMPT = "你是一个有用的AI助手，请用中文回答。"
 
-MAX_TOKENS = 512
-TEMPERATURE = 0.7
+# 单次生成上限。这个值直接决定「长回答会不会被切断」：512 时实测让它写一个
+# 解析身份证的 PHP 函数，写到一半就停在 finish_reason=length 上。它是**上限
+# 而非目标**，答完即停，所以调高不会让简单问题变慢，只让长回答有机会写完。
+# 外部客户端自带的 max_tokens 也按这个值封顶。
+MAX_TOKENS = 2048
 
-# 外部客户端可以自带 max_tokens，但要封顶：上下文只有 4096，放开会被打爆
-MAX_TOKENS_CAP = 2048
+TEMPERATURE = 0.7
 
 # 工具循环最多几轮。4B 模型偶尔会固执地反复调同一个工具，到顶后改用
 # 不带工具的请求强制收尾，避免无限循环。
@@ -80,6 +82,44 @@ def _merge_tool_call(acc: dict, frag: dict) -> None:
         slot["name"] = fn["name"]
     if fn.get("arguments"):
         slot["arguments"] += fn["arguments"]
+
+
+def _context_error(body: bytes) -> str | None:
+    """prompt 本身超出上下文时，给一句用户能照做的话；别的错误返回 None
+
+    llama.cpp 只在 **prompt 本身**超限时拒绝，不管 max_tokens 要多少 ——
+    实测 prompt 2513 tokens 配 max_tokens 2048（合计 4561 > 4096）照样正常返回，
+    它生成到剩余空间用尽就自己以 finish_reason=length 收尾。所以这里不需要
+    「收紧 max_tokens 重试」那套，真正会撞上的场景只剩「输入太长」。
+
+    错误体里直接带着用量，不必自己估算字符数：
+        {"error":{"code":400,"message":"request (12008 tokens) exceeds the
+         available context size (4096 tokens), try increasing it",
+         "type":"exceed_context_size_error","n_prompt_tokens":12008,"n_ctx":4096}}
+    """
+    try:
+        err = json.loads(body).get("error") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    if err.get("type") != "exceed_context_size_error":
+        return None
+    n_prompt = err.get("n_prompt_tokens") or 0
+    n_ctx = err.get("n_ctx") or 0
+    if n_prompt and n_ctx:
+        return f"输入过长：{n_prompt} tokens 已超出模型 {n_ctx} 的上下文上限，请缩短输入"
+    return "输入超出模型的上下文上限，请缩短输入"
+
+
+def _upstream_message(body: bytes, status: int) -> str:
+    """把上游错误体转成一句能看懂的话，别再套一层 httpx 的异常文本"""
+    try:
+        err = json.loads(body)
+        msg = (err.get("error") or {}).get("message") or err.get("message")
+        if msg:
+            return f"上游返回 {status}: {msg}"
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    return f"上游返回 {status}: {body[:200].decode('utf-8', 'replace')}"
 
 
 def _finalize(acc: dict) -> list:
@@ -220,7 +260,14 @@ class NLPAdapter(BaseServiceAdapter):
                 f"{self.service_url}/v1/chat/completions",
                 json=self._payload(messages, tools, True, max_tokens, temperature),
             ) as resp:
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    # 不用 raise_for_status：它抛出的是 httpx 的通用文案，
+                    # 而 llama.cpp 的错误体里带着「输入多少 token、上限多少」
+                    # 这种用户能照做的信息，值得原样传达
+                    body = await resp.aread()
+                    raise RuntimeError(
+                        _context_error(body) or _upstream_message(body, resp.status_code)
+                    )
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     # 流里夹杂空行和注释行，只认 data: 帧
@@ -365,6 +412,7 @@ class NLPAdapter(BaseServiceAdapter):
         params = self._with_messages(input_data, params)
         started = time.time()
         trace: list = []
+        finish = "stop"
         try:
             async for kind, payload in self.run_tools(
                     list(params["messages"]), self._tools_on(params)):
@@ -383,6 +431,7 @@ class NLPAdapter(BaseServiceAdapter):
                     }})
                 elif kind == "done":
                     trace = payload["trace"]
+                    finish = payload["finish_reason"]
         except Exception as e:
             logger.error(f"NLP 流式推理失败: {e}")
             yield _sse({"error": f"推理失败: {e}"})
@@ -392,6 +441,9 @@ class NLPAdapter(BaseServiceAdapter):
             "done": True,
             "model": model,
             "latency_ms": int((time.time() - started) * 1000),
+            # 让前端能区分「答完了」和「被长度上限截断」—— 截断是用户唯一能
+            # 察觉到的失败，不说明的话只会以为模型坏了
+            "finish_reason": finish,
         }
         if trace:
             done["tool_calls"] = trace

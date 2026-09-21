@@ -454,6 +454,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
            （outEl.textContent = text），轨迹放进去会被冲掉 -->
       <div class="pipe-vis" id="nlp-tool-trace" style="display:none"></div>
       <div class="result-body" id="nlp-output" style="font-size:15px"></div>
+      <!-- 回答被长度上限截断时的提示。同样得放在输出区之外：输出区是整体
+           重写的，写在里面的内容会被流式文本冲掉 -->
+      <div id="nlp-truncated" style="display:none;margin-top:10px;font-size:13px;color:var(--yellow)"></div>
     </div>
   </div>
 </div>
@@ -862,6 +865,8 @@ async function runNlpStream(input, model, params, outEl) {
   const steps = new Map();
   traceEl.textContent = '';
   traceEl.style.display = 'none';
+  const truncEl = document.getElementById('nlp-truncated');
+  truncEl.style.display = 'none';
 
   outEl.textContent = '';
   try {
@@ -894,6 +899,13 @@ async function runNlpStream(input, model, params, outEl) {
   badge.style.background = ''; badge.style.color = '';
   document.getElementById('nlp-meta-model').innerHTML = '模型: <b>' + model + '</b>';
   document.getElementById('nlp-meta-latency').innerHTML = '耗时: <b>' + ((meta && meta.latency_ms) || '-') + 'ms</b>';
+
+  // 截断是用户唯一能察觉到的失败：不说明的话，看起来就跟模型突然哑了
+  // 一样。写清是长度上限而非报错，免得以为是服务坏了。
+  if (meta && meta.finish_reason === 'length') {
+    truncEl.textContent = '⚠️ 回答达到长度上限，末尾被截断（不是报错，是生成被强制收尾）';
+    truncEl.style.display = 'block';
+  }
 }
 
 function showResult(service, data) {

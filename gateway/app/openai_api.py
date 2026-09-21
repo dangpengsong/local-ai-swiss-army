@@ -27,7 +27,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .adapters.nlp import MAX_TOKENS_CAP, SUPPORTED_MODELS
+from .adapters.nlp import MAX_TOKENS, SUPPORTED_MODELS
 from .config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -125,12 +125,12 @@ def _sampling(req: ChatCompletionRequest) -> tuple[int | None, float | None]:
     """收敛客户端给的采样参数
 
     max_tokens 必须封顶：上下文只有 4096，客户端默认可能填 4096 甚至更大，
-    放开会把上下文打爆（llama.cpp 会直接截断 prompt，表现成「答非所问」）。
+    放开会让请求超限（llama.cpp 返回 400，客户端只会看到一个不明所以的失败）。
     temperature 夹到 [0, 2]，负数和 100 都是无效值。
     """
     max_tokens = None
     if req.max_tokens and req.max_tokens > 0:
-        max_tokens = min(req.max_tokens, MAX_TOKENS_CAP)
+        max_tokens = min(req.max_tokens, MAX_TOKENS)
 
     temperature = None
     if req.temperature is not None:
