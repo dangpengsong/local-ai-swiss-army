@@ -13,6 +13,10 @@ class ASRAdapter(BaseServiceAdapter):
     async def infer(self, input_data: str, model: str = "whisper", params: dict = None) -> dict:
         params = params or {}
 
+        # gateway 的 InferRequest.model 默认是空串，会覆盖签名上的默认值；
+        # 不传 model 时落到该服务的首选模型
+        model = model or SUPPORTED_MODELS[0]
+
         if model not in SUPPORTED_MODELS:
             return {"error": f"不支持的模型: {model}，可选: {SUPPORTED_MODELS}"}
 

@@ -1,4 +1,4 @@
-"""NLP 适配器 — Qwen3-4B / SmolLM2 / Qwen2.5-0.5B（via llama.cpp）"""
+"""NLP 适配器 — Qwen3-4B（via llama.cpp）"""
 
 import asyncio
 import json
@@ -6,7 +6,7 @@ import json
 from .base import BaseServiceAdapter
 from ..mock import mock_nlp
 
-SUPPORTED_MODELS = ["qwen3", "smollm2", "qwen"]
+SUPPORTED_MODELS = ["qwen3"]
 
 
 def _sse(obj: dict) -> str:
@@ -20,6 +20,10 @@ class NLPAdapter(BaseServiceAdapter):
     async def infer(self, input_data: str, model: str = "qwen3", params: dict = None) -> dict:
         params = params or {}
         task = params.get("task", "chat")
+
+        # gateway 的 InferRequest.model 默认是空串，会覆盖签名上的默认值；
+        # 不传 model 时落到该服务的首选模型
+        model = model or SUPPORTED_MODELS[0]
 
         if model not in SUPPORTED_MODELS:
             return {"error": f"不支持的模型: {model}，可选: {SUPPORTED_MODELS}"}
@@ -42,6 +46,9 @@ class NLPAdapter(BaseServiceAdapter):
         """
         params = params or {}
         task = params.get("task", "chat")
+
+        # 同 infer：空 model 落到首选模型
+        model = model or SUPPORTED_MODELS[0]
 
         if model not in SUPPORTED_MODELS:
             yield _sse({"error": f"不支持的模型: {model}，可选: {SUPPORTED_MODELS}"})

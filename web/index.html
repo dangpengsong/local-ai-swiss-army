@@ -433,8 +433,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="field-label">模型</div>
         <select id="nlp-model">
           <option value="qwen3">Qwen3-4B</option>
-          <option value="qwen">Qwen2.5-0.5B</option>
-          <option value="smollm2">SmolLM2</option>
         </select>
       </div>
       <div class="field">
@@ -994,8 +992,7 @@ function addBuilderStep() {
       <option value="translate:mtran">翻译 (mtran)</option>
       <option value="tts:piper">语音合成 (piper)</option>
       <option value="tts:outetts" disabled>语音合成 (outetts) — 未实现</option>
-      <option value="nlp:qwen">文本AI (qwen)</option>
-      <option value="nlp:smollm2">文本AI (smollm2)</option>
+      <option value="nlp:qwen3">文本AI (qwen3)</option>
     </select>
     <button class="btn btn-sm btn-ghost" onclick="removeBuilderStep(this)" style="padding:4px 10px">✕</button>
   `;

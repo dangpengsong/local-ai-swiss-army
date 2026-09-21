@@ -102,12 +102,6 @@ download_nlp() {
     download "Qwen3-4B-Instruct-2507-GGUF（约 2.3GB，推荐主力）" \
         "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" \
         "models/nlp/qwen3-4b-instruct-2507-q4_k_m.gguf"
-    download "Qwen2.5-0.5B-GGUF" \
-        "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf" \
-        "models/nlp/qwen2.5-0.5b-instruct-q4_k_m.gguf"
-    download "SmolLM2-1.7B-GGUF" \
-        "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF/resolve/main/smollm2-1.7b-instruct-q4_k_m.gguf" \
-        "models/nlp/smollm2.gguf"
     echo ""
 }
 

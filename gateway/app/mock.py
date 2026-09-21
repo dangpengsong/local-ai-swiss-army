@@ -24,7 +24,7 @@ MOCK_TRANSLATE_TEXTS = {
 MOCK_TTS_AUDIO_B64 = "UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="
 
 MOCK_NLP_RESPONSES = {
-    "chat": "这是一个本地语言模型的回复，实际运行时将调用 SmolLM2 或 Qwen2.5 模型。",
+    "chat": "这是一个本地语言模型的回复，实际运行时将调用 Qwen3-4B 模型。",
     "summarize": "摘要：本文介绍了本地部署小模型的方案。",
     "classify": "分类结果：技术文档（置信度 0.95）",
 }
@@ -60,7 +60,7 @@ def mock_tts(model: str = "piper") -> dict:
     }
 
 
-def mock_nlp(model: str = "qwen", task: str = "chat") -> dict:
+def mock_nlp(model: str = "qwen3", task: str = "chat") -> dict:
     return {
         "output": MOCK_TAG + MOCK_NLP_RESPONSES.get(task, MOCK_NLP_RESPONSES["chat"]),
         "model": model,

@@ -148,22 +148,6 @@ MODEL_REGISTRY = {
         # 实际 2497281120 字节（十进制 2497 MB）。前端直接把此值显示给用户，故用十进制
         "size_mb": 2497,
     },
-    "smollm2": {
-        "name": "SmolLM2",
-        "category": "nlp",
-        "desc": "小型语言模型",
-        "files": ["models/nlp/smollm2.gguf"],
-        "url": "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF/resolve/main/smollm2-1.7b-instruct-q4_k_m.gguf",
-        "size_mb": 1050,
-    },
-    "qwen": {
-        "name": "Qwen2.5-0.5B",
-        "category": "nlp",
-        "desc": "通义千问轻量版",
-        "files": ["models/nlp/qwen2.5-0.5b-instruct-q4_k_m.gguf"],
-        "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "size_mb": 400,
-    },
 }
 
 # 下载进度追踪
@@ -233,8 +217,6 @@ def _model_service_urls(model_id: str) -> list[str]:
         "piper_huayan": [s.tts_url],
         "outetts": [s.tts_url],
         "openaudio": [s.tts_url],
-        "smollm2": [s.nlp_url],
-        "qwen": [s.nlp_url],
         "qwen3": [s.nlp_url],
     }.get(model_id, [])
 
@@ -500,7 +482,7 @@ async def voice_pipeline(req: PipelineRequest):
 async def custom_pipeline(req: CustomPipelineRequest):
     """
     自定义管线 — 按 steps 列表顺序依次执行
-    steps 格式: ["asr:whisper", "nlp:qwen", "tts:piper"]
+    steps 格式: ["asr:whisper", "nlp:qwen3", "tts:piper"]
     """
     steps = req.steps
     params = req.params or {}

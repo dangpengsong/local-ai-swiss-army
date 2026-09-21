@@ -1,4 +1,4 @@
-"""NLP 模型服务 — Qwen3-4B / Qwen2.5-0.5B / SmolLM2（via llama-cpp-python）"""
+"""NLP 模型服务 — Qwen3-4B（via llama-cpp-python）"""
 
 import asyncio
 import json
@@ -16,8 +16,6 @@ app = FastAPI(title="NLP Service")
 
 MODEL_FILES = {
     "qwen3": "/models/qwen3-4b-instruct-2507-q4_k_m.gguf",
-    "qwen": "/models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-    "smollm2": "/models/smollm2.gguf",
 }
 
 
@@ -82,7 +80,7 @@ TASK_PROMPTS = {
 
 class InferRequest(BaseModel):
     input: str
-    model: str = "qwen"
+    model: str = "qwen3"
     params: dict = None
 
 

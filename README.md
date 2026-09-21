@@ -2,7 +2,7 @@
 
 > 来源：公众号「名侦探科男」
 >
-> 本地运行 11 个 AI 模型，零联网、零 API Key，Docker 一键部署。
+> 本地运行 9 个 AI 模型，零联网、零 API Key，Docker 一键部署。
 
 ## 架构
 
@@ -24,7 +24,7 @@
 └─────┘└─────┘└─────┘└─────┘
 ```
 
-## 12 个模型
+## 9 个模型
 
 | 类别 | 模型 | 引擎 | 备注 |
 |------|------|------|------|
@@ -36,9 +36,7 @@
 | 语音合成 | Piper 华言 | piper-tts | 备选中文语音（espeak 方案，中英混读略好） |
 | 语音合成 | OuteTTS-0.6B | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
 | 语音合成 | OpenAudio S1-Mini | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
-| 文本AI | **Qwen3-4B** | llama-cpp-python | 通义千问，推荐主力（中文强，纯 CPU 约 7 tok/s） |
-| 文本AI | Qwen2.5-0.5B | llama-cpp-python | 通义千问轻量版（约 43 tok/s，质量有限，适合快速试跑） |
-| 文本AI | SmolLM2 | llama-cpp-python | HuggingFace |
+| 文本AI | **Qwen3-4B** | llama-cpp-python | 通义千问，纯 CPU 约 7 tok/s（支持流式，首 token 0.15s） |
 
 > 标注「⚠️ 未实现」的 4 个模型仅在注册表中占位，选择后不会返回真实推理结果。
 
@@ -49,7 +47,7 @@
 ### 前置要求
 
 - Docker Desktop（或 Docker Engine + Docker Compose V2）
-- 12GB+ 可用磁盘空间：模型约 4.7GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 4GB + 构建缓存约 2.8GB（NLP 服务的 llama-cpp-python 需现场编译）
+- 12GB+ 可用磁盘空间：模型约 3GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 4GB + 构建缓存约 2.8GB（NLP 服务的 llama-cpp-python 需现场编译）
 - macOS / Linux / Windows WSL2
 
 ### 联网要求
@@ -77,7 +75,6 @@
 | ARG | 默认值 | 用途 |
 |-----|--------|------|
 | `PIP_INDEX_URL` | 清华 PyPI 镜像 | 所有服务的 pip 依赖 |
-| `TORCH_CPU_INDEX_URL` | PyTorch 官方 CPU 源 | 仅 translate 使用。CPU 版 torch 只在该源提供 |
 
 ```bash
 # 海外网络可整体切回官方源
@@ -134,7 +131,7 @@ docker compose up -d gateway
 **完整模式（下载模型 + 启动所有服务）：**
 
 ```bash
-# 下载可用模型（约 2.4GB）
+# 下载可用模型（约 2.7GB）
 ./scripts/download-models.sh all
 
 # 构建并启动全部服务
@@ -385,7 +382,7 @@ docker compose up -d --no-build tts   # 只启动该服务
 ```
 
 **Q: 内存不足？**
-A: Qwen2.5-0.5B 约 500MB 内存，SmolLM2 约 1.2GB。可只下载需要的模型。
+A: Qwen3-4B 常驻约 2.9GB —— Q4_K_M 权重 2.3GB + KV cache 约 590MB（默认 `NLP_N_CTX=4096`）。机器吃紧可调小 `NLP_N_CTX`。
 
 **Q: 模型页显示「服务未启动」，但容器明明在跑？**
 A: 三种状态含义不同，模型页用的是**文件是否到位**与**服务是否在跑**两个维度：
