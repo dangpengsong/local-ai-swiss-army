@@ -33,7 +33,7 @@ def _init_adapters():
         "asr": ASRAdapter(s.asr_url, s.local_ai_mock),
         "translate": TranslateAdapter(s.mtran_url, s.local_ai_mock),
         "tts": TTSAdapter(s.tts_url, s.local_ai_mock),
-        "nlp": NLPAdapter(s.nlp_url, s.local_ai_mock, s.nlp_backend),
+        "nlp": NLPAdapter(s.nlp_url, s.local_ai_mock, s.nlp_tools),
     }
 
 adapters = _init_adapters()

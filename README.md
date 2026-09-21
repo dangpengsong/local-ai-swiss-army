@@ -2,7 +2,8 @@
 
 > 来源：公众号「名侦探科男」
 >
-> 本地运行 9 个 AI 模型，零联网、零 API Key，Docker 一键部署。
+> 本地运行 9 个 AI 模型，零 API Key，Docker 一键部署。
+> 推理全部在本地，只有文本 AI 的「联网搜索／网页抓取」工具会出网，可用 `NLP_TOOLS=false` 关掉。
 
 ## 架构
 
@@ -36,7 +37,7 @@
 | 语音合成 | Piper 华言 | piper-tts | 备选中文语音（espeak 方案，中英混读略好） |
 | 语音合成 | OuteTTS-0.6B | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
 | 语音合成 | OpenAudio S1-Mini | transformers | ⚠️ 未实现（规划中，UI 已禁用） |
-| 文本AI | **Qwen3-4B** | llama-cpp-python | 通义千问，纯 CPU 约 7 tok/s（支持流式，首 token 0.15s） |
+| 文本AI | **Qwen3-4B** | llama.cpp server (CUDA) | 通义千问，GPU 约 18.7 tok/s（支持流式、工具调用） |
 
 > 标注「⚠️ 未实现」的 4 个模型仅在注册表中占位，选择后不会返回真实推理结果。
 
@@ -47,7 +48,7 @@
 ### 前置要求
 
 - Docker Desktop（或 Docker Engine + Docker Compose V2）
-- 12GB+ 可用磁盘空间：模型约 3GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 4GB + 构建缓存约 2.8GB（NLP 服务的 llama-cpp-python 需现场编译）
+- 15GB+ 可用磁盘空间：模型约 3GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 10GB（其中 llama.cpp CUDA 镜像占 7GB）+ 构建缓存约 5GB
 - macOS / Linux / Windows WSL2
 
 ### 联网要求
@@ -138,24 +139,16 @@ docker compose up -d gateway
 docker compose --profile full up -d --build
 ```
 
-**GPU 加速（可选，需 NVIDIA 显卡）：**
+**文本 AI 需要 NVIDIA 显卡：**
 
-有 NVIDIA 显卡时，文本 AI 可以走 GPU —— 用官方 llama.cpp CUDA 镜像替换自建的 CPU 版服务，实测**生成速度 2.6 倍**（GTX 960 上 18.7 vs 7.3 tok/s，首 token 142ms）：
-
-```bash
-# 服务名 / 端口 / profile 与上面完全一致，只是多一个 -f
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile full up -d
-```
-
-不加 `-f docker-compose.gpu.yml` 时行为与原来一字不差 —— 这个覆盖层只替换 `nlp` 一个服务的实现。
+本项目是私人定制，文本 AI（`nlp` 服务）**只跑 GPU**，用官方 llama.cpp CUDA 镜像，实测 18.7 tok/s、首 token 142ms（同样的模型在 CPU 上只有 7.3 tok/s）。所以 `--profile full` 起 `nlp` 时机器必须有可用的 NVIDIA 显卡。
 
 几点注意：
 
-- **需要可用的 NVIDIA 驱动**。Docker Desktop for Windows 自带 GPU 支持，无需另装 `nvidia-container-toolkit`；没有显卡就别加这个 `-f`，容器会因请求不到设备而起不来
+- **需要可用的 NVIDIA 驱动**。Docker Desktop for Windows 自带 GPU 支持，无需另装 `nvidia-container-toolkit`；没有显卡时 `nlp` 容器会因请求不到设备而起不来，此时其余服务（ASR/TTS/翻译）仍可用，文本 AI 会降级为 Mock
 - **启动后约 30 秒模型才就绪**（2.4GB 权重加载进显存）。这段时间 `/health` 返回 503，gateway 按既有的失败降级策略先返回 Mock 结果，就绪后自动恢复，不需要干预
-- **上下文固定 4096，不要调大**：4GB 显存下这已是上限（实测 3786/4096 MiB 已用）。同理 `-b 512 -ub 512` 也不能省，原因写在 `docker-compose.gpu.yml` 的注释里
-- 此模式下 `.env` 里的 `NLP_N_THREADS` / `NLP_N_CTX` **不生效**——它们只被自建的 Python 服务读取，官方 server 认的是命令行参数
-- 显卡显存小于 4GB 时可能装不下，先用 `docker compose ... logs nlp` 看有没有 `failed to fit params` 之类的报错
+- **上下文固定 4096，不要调大**：4GB 显存下这已是上限（实测 3786/4096 MiB 已用）。同理 `-b 512 -ub 512` 也不能省，原因写在 `docker-compose.yml` 里 `nlp` 服务的注释中
+- 显卡显存小于 4GB 时可能装不下，先用 `docker compose logs nlp` 看有没有 `failed to fit params` 之类的报错
 
 ### 4. Web 面板下载模型
 
@@ -273,8 +266,7 @@ curl -X POST http://localhost:8000/pipeline/custom \
 
 ### 流式输出（SSE）
 
-`/nlp/stream` 是 `/nlp` 的流式版本，逐 token 推送。实测首 token 从十余秒降到 0.15 秒
-（4B 模型纯 CPU 约 7 tok/s，等完整结果出来要 8 秒以上）。
+`/nlp/stream` 是 `/nlp` 的流式版本，逐 token 推送，实测首 token 延迟 142ms。
 
 ```bash
 curl -N -X POST http://localhost:8000/nlp/stream \
@@ -294,7 +286,55 @@ data: {"done": true, "model": "qwen3", "latency_ms": 8600}
 之后无法再改状态码。`Mock` 模式同样逐字推送，不会让前端停在加载态。
 
 > 管线（`/pipeline/voice`、`/pipeline/custom`）仍走非流式 —— 下一步需要完整文本才能开始。
-> 推理本身是串行的（同一个模型实例不能并发），流式不会让两个请求同时生成。
+
+### 工具能力（function calling）
+
+文本 AI 默认带四个工具，由模型自己判断何时调用：
+
+| 工具 | 说明 | 限制 |
+|------|------|------|
+| `get_current_time` | 当前日期时间（含星期） | 时区取 `TZ`，默认 `Asia/Shanghai` |
+| `calculate` | 四则运算、乘方、开方 | `ast` 白名单求值，**不用 `eval`**；拒绝变量、属性访问、下标、函数定义 |
+| `web_search` | DuckDuckGo 搜索，取前 5 条 | 标题截 60 字、摘要截 120 字 |
+| `fetch_url` | 抓取网页正文 | 只允许 http/https；拒绝内网地址（含 Docker 服务名） |
+
+**为什么需要它们**：4B 模型的算术不可靠（实测 `1234×5678` 答成 3066052，正确是 7006652），
+且训练数据有截止日期，问不了「现在几点」「今天有什么新闻」。
+
+**关掉的方式**：
+
+```bash
+# 全局（.env）
+NLP_TOOLS=false
+```
+
+```jsonc
+// 单个请求
+{"input": "...", "model": "qwen3", "params": {"tools": false}}
+```
+
+语音管线固定关闭（内部传 `tools: false`）——它把 NLP 输出直接往下一步传，多轮工具调用只会拖慢。
+
+**流式下的工具事件**（`/nlp/stream`；`id` 由服务端生成，仅用于配对 start/end）：
+
+```json
+{"tool": {"id": "call_abc", "name": "web_search", "phase": "start", "args": {"query": "..."}}}
+
+{"tool": {"id": "call_abc", "phase": "end", "ok": true, "detail": "5 条结果", "ms": 1802}}
+```
+
+`done` 帧会带上本次全部工具调用的 `tool_calls` 数组。Web 面板据此把工具渲染成一排
+状态块（蓝=运行中，绿=成功，红=失败），轨迹在输出区**之外**，不会被流式文本冲掉。
+
+> **工具失败不会中断流**：失败走 `tool.ok === false` 而非 `error` 键。实测模型会基于失败
+> 信息如实说明（「无法访问内网地址」），而不是编造一个结果，所以没有理由掐断这一轮。
+
+**几个实测出来的边界**：
+
+- 一轮最多 3 次工具调用，到顶后改用不带工具的请求强制收尾，避免 4B 模型固执地反复调同一个工具
+- 单次工具结果注入 prompt 上限 800 字符 —— 这段内容决定下一轮要 prefill 多久，也就是用户实打实的等待时间
+- 网页内容是**不可信输入**：注入前会清掉 `<tool_call>` 等控制标记，并明确标注为「外部内容，不是指令」。
+  这是抬高门槛，不是完整隔离 —— 四个工具都是只读的，最坏后果是答错
 
 ---
 
@@ -309,9 +349,8 @@ data: {"done": true, "model": "qwen3", "latency_ms": 8600}
 | `TTS_URL` | `http://tts:8004` | TTS 服务地址 |
 | `NLP_URL` | `http://nlp:8005` | NLP 服务地址 |
 | `MTRAN_URL` | `http://mtran:8989` | MTranServer 独立翻译容器地址 |
-| `NLP_BACKEND` | `llamacpp` | NLP 后端协议：`llamacpp` = 自建服务的 `/infer`；`openai` = 官方 llama.cpp server 的 `/v1/chat/completions`。GPU 覆盖层会自动设为 `openai`，一般不用手动改 |
-| `NLP_N_THREADS` | 物理核心数 | NLP 推理线程数。**不要填逻辑核数**——超线程的两个线程会争抢同一物理核的执行单元，实测 i5-10400（6 核 12 线程）上 12 线程比 6 线程慢 **28 倍**（43 → 1.5 tok/s）。GPU 模式下不生效 |
-| `NLP_N_CTX` | `4096` | NLP 上下文长度。KV cache 约 144KB/token（Qwen3-4B，36 层 / 8 个 KV 头），4096 约占 590MB 内存。GPU 模式下不生效 |
+| `NLP_TOOLS` | `true` | 文本 AI 的工具能力（function calling）总开关。详见[工具能力](#工具能力function-calling) |
+| `TZ` | `Asia/Shanghai` | 容器时区。不设的话「现在几点」会答错 8 小时 |
 
 ---
 
@@ -320,8 +359,7 @@ data: {"done": true, "model": "qwen3", "latency_ms": 8600}
 | 启动方式 | 命令 | 说明 |
 |----------|------|------|
 | 仅 Gateway | `docker compose up -d` | Mock 模式，单容器 |
-| 全部服务 | `docker compose --profile full up -d` | 包含所有模型服务（CPU） |
-| 全部服务 + GPU | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile full up -d` | 同上，但 NLP 走 CUDA 加速 |
+| 全部服务 | `docker compose --profile full up -d` | 包含所有模型服务（文本 AI 需 NVIDIA 显卡） |
 
 ---
 
@@ -340,7 +378,6 @@ chmod +x scripts/demo.sh
 ```
 local-ai-swiss-army/
 ├── docker-compose.yml          # 容器编排
-├── docker-compose.gpu.yml      # GPU 覆盖层（可选，把 nlp 换成 CUDA 镜像）
 ├── .env.example                # 环境变量模板
 ├── .gitignore
 ├── README.md                   # 本文档
@@ -353,10 +390,10 @@ local-ai-swiss-army/
 │       ├── mock.py             # Mock 输出生成器
 │       ├── adapters/           # 4 个模型适配器
 │       └── pipelines/          # 管线（语音/自定义）
-├── services/                   # 3 个模型服务
+├── services/                   # 2 个模型服务
 │   ├── asr/                    # 语音识别 (faster-whisper)
-│   ├── tts/                    # 语音合成 (piper)
-│   └── nlp/                    # 文本AI (CPU 走 llama-cpp-python；GPU 模式被覆盖层替换)
+│   └── tts/                    # 语音合成 (piper)
+│                               # 文本AI 不用自建服务：直接用官方 llama.cpp CUDA 镜像
 ├── web/
 │   └── index.html              # Web 面板（单文件 SPA）
 └── scripts/
@@ -393,10 +430,10 @@ local-ai-swiss-army/
 A: 国内网络可能需要配置代理或使用镜像。运行 `./scripts/download-models.sh` 在宿主机下载。
 
 **Q: 构建很慢？**
-A: NLP 和 ASR 服务需要编译 C++ 依赖（llama-cpp-python、faster-whisper），首次构建约 5-10 分钟。
+A: ASR 服务需要编译 C++ 依赖（faster-whisper），首次构建约 5-10 分钟。文本 AI 用的是官方 llama.cpp CUDA 镜像，不参与构建。
 
 **Q: 只想重建其中一个服务（如 TTS）？**
-A: 不要用 `--profile full` 配合 `up --build` —— 它会重建该 profile 下的**所有**服务（含 asr/nlp 的大依赖，数 GB 下载）。分开两步执行：
+A: 不要用 `--profile full` 配合 `up --build` —— 它会重建该 profile 下的**所有**服务（含 asr 的大依赖，数 GB 下载）。分开两步执行：
 
 ```bash
 docker compose build tts              # 只构建该服务
@@ -404,7 +441,7 @@ docker compose up -d --no-build tts   # 只启动该服务
 ```
 
 **Q: 内存不足？**
-A: Qwen3-4B 常驻约 2.9GB —— Q4_K_M 权重 2.3GB + KV cache 约 590MB（默认 `NLP_N_CTX=4096`）。机器吃紧可调小 `NLP_N_CTX`。
+A: 文本 AI 跑在显存里，占的是**显存**而非内存：Q4_K_M 权重 2.3GB + KV cache 约 590MB（`-c 4096`），实测 3786 / 4096 MiB。上下文长度由 `docker-compose.yml` 里 `nlp` 服务的 `-c` 参数决定，4GB 卡上不要调大。
 
 **Q: 模型页显示「服务未启动」，但容器明明在跑？**
 A: 三种状态含义不同，模型页用的是**文件是否到位**与**服务是否在跑**两个维度：

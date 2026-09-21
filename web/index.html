@@ -459,6 +459,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           <span id="nlp-meta-task"></span>
         </div>
       </div>
+      <!-- 工具调用轨迹。必须放在 #nlp-output 之外：输出区是整体重写的
+           （outEl.textContent = text），轨迹放进去会被冲掉 -->
+      <div class="pipe-vis" id="nlp-tool-trace" style="display:none"></div>
       <div class="result-body" id="nlp-output" style="font-size:15px"></div>
     </div>
   </div>
@@ -796,6 +799,62 @@ async function runInfer(service) {
   }
 }
 
+// 工具调用的展示名与图标
+const TOOL_META = {
+  get_current_time: { icon: '🕐', name: '当前时间' },
+  calculate:        { icon: '🧮', name: '计算' },
+  web_search:       { icon: '🔍', name: '联网搜索' },
+  fetch_url:        { icon: '📄', name: '抓取网页' },
+};
+
+// 步骤条副标题：优先显示工具在干什么（搜什么、算哪个式子）
+function toolArgBrief(name, args) {
+  if (!args) return '';
+  if (name === 'web_search') return args.query || '';
+  if (name === 'calculate') return args.expression || '';
+  if (name === 'get_current_time') return args.timezone || '本地时区';
+  if (name === 'fetch_url') {
+    try { return new URL(args.url).hostname; } catch (e) { return args.url || ''; }
+  }
+  return '';
+}
+
+// 工具步骤的创建与收尾。全程 createElement + textContent，不用 innerHTML ——
+// 参数和结果都来自模型，而模型可能被网页内容影响，拼 HTML 等于给它执行权。
+function renderToolEvent(t, traceEl, steps) {
+  if (t.phase === 'start') {
+    const meta = TOOL_META[t.name] || { icon: '🔧', name: t.name };
+    const el = document.createElement('div');
+    el.className = 'pipe-step running';
+    el.title = t.name + ' ' + JSON.stringify(t.args || {});
+    const icon = document.createElement('span');
+    icon.className = 'step-icon';
+    icon.textContent = meta.icon;
+    const name = document.createElement('span');
+    name.className = 'step-name';
+    name.textContent = meta.name;
+    const model = document.createElement('span');
+    model.className = 'step-model';
+    model.textContent = toolArgBrief(t.name, t.args);
+    const time = document.createElement('span');
+    time.className = 'step-time';
+    el.append(icon, name, model, time);
+    traceEl.appendChild(el);
+    traceEl.style.display = '';
+    steps.set(t.id, el);
+    return;
+  }
+  const el = steps.get(t.id);
+  if (!el) return;
+  // 整串赋值：这样 running 会被换成 done / error，不会残留
+  el.className = 'pipe-step ' + (t.ok ? 'done' : 'error');
+  const time = el.querySelector('.step-time');
+  const model = el.querySelector('.step-model');
+  if (time) time.textContent = (t.ms || 0) + 'ms';
+  // 结果摘要比参数更能说明这一步拿到了什么；参数留在 title 里可 hover 查看
+  if (model && t.detail) model.textContent = t.detail;
+}
+
 // 流式渲染 NLP 输出。用 fetch + ReadableStream 而非 EventSource：
 // EventSource 只支持 GET，带不了 JSON 请求体。
 async function runNlpStream(input, model, params, outEl) {
@@ -810,6 +869,12 @@ async function runNlpStream(input, model, params, outEl) {
   const decoder = new TextDecoder();
   let buf = '', text = '', meta = null;
 
+  // 清掉上一次运行留下的轨迹；工具步骤按本次的 tool_call id 逐个建立
+  const traceEl = document.getElementById('nlp-tool-trace');
+  const steps = new Map();
+  traceEl.textContent = '';
+  traceEl.style.display = 'none';
+
   outEl.textContent = '';
   try {
     while (true) {
@@ -823,8 +888,11 @@ async function runNlpStream(input, model, params, outEl) {
         const line = frame.split('\n').find(l => l.startsWith('data:'));
         if (!line) continue;
         const ev = JSON.parse(line.slice(5));
+        // 工具失败走 ev.tool.ok=false 而不是 ev.error：模型会基于失败信息
+        // 正常作答，这里若抛错会把整个流掐断
         if (ev.error) throw new Error(ev.error);
         if (ev.delta) { text += ev.delta; outEl.textContent = text; }
+        if (ev.tool) renderToolEvent(ev.tool, traceEl, steps);
         if (ev.done) meta = ev;
       }
     }

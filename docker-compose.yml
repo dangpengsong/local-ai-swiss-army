@@ -10,8 +10,10 @@ services:
       - NLP_URL=http://nlp:8005
       - MTRAN_URL=http://mtran:8989
       - LOCAL_AI_MOCK=${LOCAL_AI_MOCK:-auto}
-      # 默认 CPU 后端；docker-compose.gpu.yml 覆盖为 openai
-      - NLP_BACKEND=${NLP_BACKEND:-llamacpp}
+      # 文本 AI 的工具能力（联网搜索／网页抓取等）总开关
+      - NLP_TOOLS=${NLP_TOOLS:-true}
+      # 让「现在几点」和日志时间戳都用本地时区；容器默认是 UTC，会差 8 小时
+      - TZ=${TZ:-Asia/Shanghai}
       # 模型管理页的下载源（海外可改 .env 里的 HF_ENDPOINT 切回 huggingface.co）
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
@@ -56,19 +58,34 @@ services:
       - ./models/tts:/models
     restart: unless-stopped
 
+  # 文本 AI 推理（Qwen3-4B）。本项目为私人定制，只保留 GPU 这一条路：
+  # 官方 llama.cpp CUDA 镜像，实测 18.7 tok/s（CPU 侧 7.3 tok/s）
   nlp:
-    build: ./services/nlp
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: la-nlp
     profiles: ["full"]
     ports:
       - "8005:8005"
-    environment:
-      # 留空则自动取物理核心数。不要填逻辑核数：超线程会争抢同一物理核，
-      # 实测 i5-10400（6 核 12 线程）上 12 线程比 6 线程慢 28 倍
-      - NLP_N_THREADS=${NLP_N_THREADS:-}
-      - NLP_N_CTX=${NLP_N_CTX:-4096}
+    # -ngl 99     全部层放显存
+    # -c 4096     上下文；KV cache 约 144KB/token，4096 约占 590MB，再大装不下
+    # -b/-ub 512  不能省。默认 n_batch=2048 的 compute buffer 要约 1.8GB，4GB
+    #             显存装不下；而显式指定 -ngl 后 llama.cpp 会关掉自动显存适配
+    #             （common_fit_params ... abort），表现是启动卡住而不是自己降级
+    # -t 6        物理核心数，只用于 CPU 侧的辅助计算
+    # --jinja     套用 GGUF 里存的 chat template；工具调用也依赖它
+    command: >
+      -m /models/qwen3-4b-instruct-2507-q4_k_m.gguf
+      --host 0.0.0.0 --port 8005
+      -ngl 99 -c 4096 -b 512 -ub 512 -t 6 --jinja
     volumes:
       - ./models/nlp:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
 
   # MTranServer 独立翻译服务（自带 /imme 端点，可直接对接沉浸式翻译）
