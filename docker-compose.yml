@@ -68,7 +68,7 @@ services:
     profiles: ["full"]
     ports:
       - "8005:8005"
-    # -ngl 99     全部层放显存
+    # -ngl 99     全部层放显存（4B 权重 2.4GB，4GB 卡刚好）
     # -c 4096     上下文；KV cache 约 144KB/token，4096 约占 590MB，再大装不下
     # -b/-ub 512  不能省。默认 n_batch=2048 的 compute buffer 要约 1.8GB，4GB
     #             显存装不下；而显式指定 -ngl 后 llama.cpp 会关掉自动显存适配

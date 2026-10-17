@@ -170,6 +170,9 @@ class NLPAdapter(BaseServiceAdapter):
             "messages": messages,
             "max_tokens": max_tokens or MAX_TOKENS,
             "temperature": TEMPERATURE if temperature is None else temperature,
+            # 原始 Qwen3 默认开启 thinking，会把生成预算全花在思考上；
+            # 2507 系列没有这个开关，模板会忽略这个参数
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if stream:
             body["stream"] = True
