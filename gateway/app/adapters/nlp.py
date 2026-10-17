@@ -33,7 +33,10 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_MODELS = ["qwen3"]
 
-SYSTEM_PROMPT = "你是一个有用的AI助手，请用中文回答。"
+SYSTEM_PROMPT = (
+    "你是一个有用的AI助手，请用中文回答。"
+    "回答保持简洁，结果和关键要点分行列出；用户要求详细说明时再展开。"
+)
 
 # 单次生成上限。这个值直接决定「长回答会不会被切断」：512 时实测让它写一个
 # 解析身份证的 PHP 函数，写到一半就停在 finish_reason=length 上。它是**上限

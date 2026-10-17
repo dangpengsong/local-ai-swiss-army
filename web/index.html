@@ -110,6 +110,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   background:var(--bg);border-radius:8px;padding:20px;
   border:1px solid rgba(255,255,255,0.06);
   font-size:15px;line-height:1.7;
+  white-space:pre-wrap;
   position:relative;
 }
 .result-body audio{width:100%;margin-top:8px;border-radius:8px}
@@ -884,7 +885,7 @@ async function runNlpStream(input, model, params, outEl) {
         // 工具失败走 ev.tool.ok=false 而不是 ev.error：模型会基于失败信息
         // 正常作答，这里若抛错会把整个流掐断
         if (ev.error) throw new Error(ev.error);
-        if (ev.delta) { text += ev.delta; outEl.textContent = text; }
+        if (ev.delta) { text += ev.delta; outEl.textContent = text.replace(/\*\*/g, ''); }
         if (ev.tool) renderToolEvent(ev.tool, traceEl, steps);
         if (ev.done) meta = ev;
       }
