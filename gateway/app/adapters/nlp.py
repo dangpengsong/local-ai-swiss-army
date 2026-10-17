@@ -38,6 +38,17 @@ SYSTEM_PROMPT = (
     "回答保持简洁，结果和关键要点分行列出；用户要求详细说明时再展开。"
 )
 
+# 工具能力提示。实测 Qwen3-4B 面对隐含意图时，工具 description 写得再清楚
+# 也不一定会主动调用。把「先查再答」放进 system 更稳。
+# 只在本次请求真的带 tools 时注入，语音管线（tools=False）不受影响。
+TOOL_HINT = (
+    "你还可以调用工具获取实时信息、执行计算、抓取网页。凡是涉及"
+    "「今天」「现在」「几号」「星期几」这类时效性问题，必须先调用 "
+    "get_current_time；涉及「下周一」「还有几天」这类日期推算，先调用 "
+    "calculate_date；涉及数字运算先调用 calculate；需要实时信息或不确定的"
+    "内容，调用 web_search。不要凭训练数据猜测。"
+)
+
 # 单次生成上限。这个值直接决定「长回答会不会被切断」：512 时实测让它写一个
 # 解析身份证的 PHP 函数，写到一半就停在 finish_reason=length 上。它是**上限
 # 而非目标**，答完即停，所以调高不会让简单问题变慢，只让长回答有机会写完。
@@ -73,6 +84,16 @@ def _ensure_system(messages: list) -> list:
     if any(m.get("role") == "system" for m in messages):
         return messages
     return [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
+
+
+def _with_tool_hint(messages: list) -> list:
+    """把 TOOL_HINT 追加到 system 末尾，返回新的列表（不改调用方的 dict）。"""
+    out = [dict(m) for m in messages]
+    for m in out:
+        if m.get("role") == "system":
+            m["content"] = (m.get("content") or "") + "\n\n" + TOOL_HINT
+            return out
+    return [{"role": "system", "content": TOOL_HINT}, *out]
 
 
 def _merge_tool_call(acc: dict, frag: dict) -> None:
@@ -170,7 +191,9 @@ class NLPAdapter(BaseServiceAdapter):
                  max_tokens: int | None = None,
                  temperature: float | None = None) -> dict:
         body = {
-            "messages": messages,
+            # 只在真的带 tools 的轮次注入「先查再答」提示；最后一轮摘掉工具时
+            # 也一并摘掉，避免模型在没有 tools 的请求里硬写调用标记
+            "messages": _with_tool_hint(messages) if tools else messages,
             "max_tokens": max_tokens or MAX_TOKENS,
             "temperature": TEMPERATURE if temperature is None else temperature,
             # 原始 Qwen3 默认开启 thinking，会把生成预算全花在思考上；
@@ -205,6 +228,8 @@ class NLPAdapter(BaseServiceAdapter):
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         content = ""
         finish = "stop"
+
+        messages = list(messages)
 
         for round_no in range(MAX_TOOL_ROUNDS + 1):
             # 最后一轮去掉 tools：模型不可能再要求调用，只能基于已有信息作答

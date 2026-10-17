@@ -1,6 +1,6 @@
 """NLP 工具集 — 供 function calling 使用
 
-四个工具按「本地单人使用」的尺度实现：够用、不越权、不出错，
+工具按「本地单人使用」的尺度实现：够用、不越权、不出错，
 不追求完备（没有重试、没有缓存、没有分页）。
 
 工具结果会被注入下一轮 prompt，长度直接等于用户的等待时间 ——
@@ -16,7 +16,7 @@ import operator
 import os
 import re
 import socket
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -60,6 +60,32 @@ TOOL_SPECS = [
                     }
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_date",
+            "description": (
+                "把「下周一」「后天」「10月19日」这类日期表达换算成准确日期和星期，"
+                "并给出距今天的天数。凡是问题涉及日期推算（尤其是「下周一」「还有"
+                "几天」「某日是周几」），必须先调用本工具，不要自己心算 —— 你经常"
+                "把星期和日期算错。支持：今天/明天/后天/昨天/前天、本周X/下周X/"
+                "上周X、N天后/N天前、2026-10-19、10月19日。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expr": {
+                        "type": "string",
+                        "description": (
+                            "要计算的日期表达，例如「下周一」「明天」「3天后」"
+                            "「2026-10-19」「10月19日是周几」"
+                        )
+                    }
+                },
+                "required": ["expr"],
             },
         },
     },
@@ -190,6 +216,119 @@ async def _tool_get_current_time(args: dict) -> dict:
         "ok": True,
         "content": f"当前时间：{stamp}（{tz_name}，{_WEEKDAYS[now.weekday()]}）",
         "detail": stamp,
+    }
+
+
+# ── calculate_date ──
+
+_WEEKDAYS_SHORT = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+_WEEKDAY_CHARS = "一二三四五六日"
+_DATE_NOISE = ("请问", "帮我", "算一下", "是周几", "是星期几", "星期几", "周几")
+
+
+def _date_candidates(expr: str, today: date) -> list[tuple[str, date]]:
+    """把日期表达解析成候选日期，返回 [(说明, date)]。
+
+    「周一」这类无前缀表达有歧义（本周一还是下周一），返回两个候选；
+    其余表达只返回一个。
+    """
+    s = re.sub(r"\s+", "", expr)
+    for word in _DATE_NOISE:
+        s = s.replace(word, "")
+    if not s:
+        return []
+
+    # 相对天数。先匹配「大后天」，否则会被「后天」抢先命中
+    for word, delta in (
+        ("大后天", 3), ("今天", 0), ("今日", 0), ("明天", 1),
+        ("明日", 1), ("后天", 2), ("昨天", -1), ("昨日", -1), ("前天", -2),
+    ):
+        if word in s:
+            return [("", today + timedelta(days=delta))]
+
+    m = re.search(r"(\d+)[天日](前|后|以后|之前)", s)
+    if m:
+        n = int(m.group(1))
+        return [("", today + timedelta(days=n if "后" in m.group(2) else -n))]
+
+    # 完整日期：2026-10-19 / 2026/10/19 / 2026年10月19日
+    m = re.search(r"(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})[日号]?", s)
+    if m:
+        return [("", date(int(m.group(1)), int(m.group(2)), int(m.group(3))))]
+
+    # 缺省年份：10月19日。按今年算；跨年场景很少见，不猜明年
+    m = re.search(r"(\d{1,2})月(\d{1,2})[日号]", s)
+    if m:
+        return [("", date(today.year, int(m.group(1)), int(m.group(2))))]
+
+    # 周X / 星期X / 礼拜X，可带 本/这/下/上 前缀
+    m = re.search(r"(本|这|下|上)?(?:周|星期|礼拜)([一二三四五六日天1-7])", s)
+    if m:
+        prefix, wd = m.group(1) or "", m.group(2)
+        if wd == "天":
+            idx = 6
+        elif wd in _WEEKDAY_CHARS:
+            idx = _WEEKDAY_CHARS.index(wd)
+        else:
+            idx = int(wd) - 1
+        monday = today - timedelta(days=today.weekday())
+        this_week = monday + timedelta(days=idx)
+        if prefix == "上":
+            return [("上周", this_week - timedelta(days=7))]
+        if prefix == "下":
+            return [("下周", this_week + timedelta(days=7))]
+        if prefix in ("本", "这"):
+            return [("本周", this_week)]
+        if this_week < today:
+            return [("本周", this_week), ("下周", this_week + timedelta(days=7))]
+        return [("", this_week)]
+
+    return []
+
+
+async def _tool_calculate_date(args: dict) -> dict:
+    raw = str(args.get("expr") or "").strip()
+    if not raw:
+        return {"ok": False, "content": "缺少要计算的日期表达", "detail": "参数为空"}
+    if len(raw) > 100:
+        return {"ok": False, "content": "日期表达过长", "detail": "超过 100 字符"}
+
+    now = datetime.now(ZoneInfo(_default_tz_name()))
+    today = now.date()
+    try:
+        candidates = _date_candidates(raw, today)
+    except ValueError:
+        return {"ok": False, "content": f"「{raw}」不是合法日期", "detail": "日期不合法"}
+    if not candidates:
+        return {
+            "ok": False,
+            "content": (
+                "无法识别这个日期表达。支持：今天/明天/后天/昨天/前天、"
+                "本周一/下周一/上周五、3天后/2天前、2026-10-19、10月19日。"
+            ),
+            "detail": "无法解析",
+        }
+
+    def fmt(d: date) -> str:
+        delta = (d - today).days
+        rel = "今天" if delta == 0 else (
+            f"{delta} 天后" if delta > 0 else f"{-delta} 天前"
+        )
+        return f"{d:%Y-%m-%d} {_WEEKDAYS_SHORT[d.weekday()]}（{rel}）"
+
+    lines = [f"今天是 {today:%Y-%m-%d} {_WEEKDAYS_SHORT[today.weekday()]}。"]
+    if len(candidates) == 1:
+        lines.append(f"「{raw}」= {fmt(candidates[0][1])}")
+    else:
+        # 无前缀的「周一」：把本周和下周都列出来，让模型结合上下文选
+        lines.append(f"「{raw}」有歧义：")
+        lines.extend(f"- {label}：{fmt(d)}" for label, d in candidates)
+
+    first = candidates[0][1]
+    return {
+        "ok": True,
+        "content": "\n".join(lines),
+        "detail": f"{first:%m-%d} {_WEEKDAYS_SHORT[first.weekday()]}",
     }
 
 
@@ -541,6 +680,7 @@ async def _tool_fetch_url(args: dict) -> dict:
 
 _HANDLERS = {
     "get_current_time": _tool_get_current_time,
+    "calculate_date": _tool_calculate_date,
     "calculate": _tool_calculate,
     "web_search": _tool_web_search,
     "fetch_url": _tool_fetch_url,
