@@ -2,7 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Debian 官方源国内直连约 37KB/s，默认换腾讯镜像；海外环境可删掉这行 sed
+RUN sed -i 's|http://deb.debian.org|https://mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     build-essential ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
