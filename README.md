@@ -49,13 +49,76 @@
 
 ### 前置要求
 
-- Docker Desktop（或 Docker Engine + Docker Compose V2）
-- 15GB+ 可用磁盘空间：模型约 3GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 10GB（其中 llama.cpp CUDA 镜像占 7GB）+ 构建缓存约 5GB
-- macOS / Linux / Windows WSL2
+| 项目 | 要求 |
+|---|---|
+| Docker | Docker Desktop（Windows 使用 **WSL2 后端**）或 Docker Engine + Compose V2 |
+| GPU（仅文本 AI 需要） | NVIDIA 显卡，Windows 驱动支持 WSL2；WSL 里执行 `nvidia-smi` 有输出 |
+| 显存 | **≥ 4GB**（Qwen3-4B + 4K 上下文约 3.8GB） |
+| 磁盘 | 20GB+ 可用空间：模型约 3GB（含 Qwen3-4B 的 2.3GB）+ 镜像约 10GB（其中 llama.cpp CUDA 镜像 7GB）+ 构建缓存约 5GB |
+| 系统 | macOS / Linux / Windows WSL2 |
+| 网络 | 首次部署需联网拉镜像、依赖和模型；运行时完全离线 |
+
+**没有 NVIDIA GPU**：`nlp` 容器起不来，文本 AI 会降级为 Mock；其余服务（ASR/TTS/翻译）仍可用。只想体验接口可以用下面的 Mock 模式。
+
+### 最短路径
+
+```bash
+# 1. 克隆代码
+git clone https://github.com/dangpengsong/local-ai-swiss-army.git
+cd local-ai-swiss-army
+
+# 2. 初始化目录和 .env，并构建 gateway
+chmod +x scripts/*.sh
+./scripts/setup.sh
+
+# 3. 下载模型（合计约 2.8GB）
+./scripts/download-models.sh all
+
+# 4. 构建并启动全部服务
+docker compose --profile full up -d --build
+```
+
+打开 `http://localhost:8000` 即可使用。
+
+### 各步骤说明
+
+1. **`setup.sh`**：创建 `models/{asr,tts,nlp,mtran}`、把 `.env.example` 复制为 `.env`、构建 gateway 镜像。
+2. **`download-models.sh all`**：下载 Qwen3-4B（2.4GB）、faster-whisper-base（ASR）、Piper 中文音色 + g2pW（TTS）。默认走 `hf-mirror.com`，海外可 `HF_MIRROR=https://huggingface.co ./scripts/download-models.sh all`。
+3. **`up -d --build`**：首次会拉取 `llama.cpp:server-cuda`（约 7GB）和 `mtranserver`，并构建 gateway/asr/tts。
+
+### 验证部署
+
+```bash
+docker ps                                    # 5 个容器都是 Up，la-nlp 为 healthy
+curl -s http://localhost:8005/health         # llama.cpp 返回 ok
+curl -s http://localhost:8000/v1/models      # context_length 应为 4096
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/   # 200
+```
+
+浏览器打开 `http://localhost:8000`，顶部菜单默认选中「文本 AI」。问一句「现在几点」，能调用工具并回答即说明完整链路正常。
+
+### Mock 模式（无需模型）
+
+```bash
+docker compose up -d gateway
+```
+
+访问 `http://localhost:8000`，所有服务返回模拟数据。模拟输出的文本统一带 `[模拟]` 前缀，前端同时显示黄色「模拟」徽章。这样即使只部署了部分服务（例如只起了 nlp、mtran 容器没起），也不会把模拟结果误认为真实翻译/识别结果。
+
+### 文本 AI 的 GPU 说明
+
+本项目是私人定制，文本 AI（`nlp` 服务）**只跑 GPU**，用官方 llama.cpp CUDA 镜像，实测 18.7 tok/s、首 token 142ms（同样的模型在 CPU 上只有 7.3 tok/s）。所以 `--profile full` 起 `nlp` 时机器必须有可用的 NVIDIA 显卡。
+
+几点注意：
+
+- **需要可用的 NVIDIA 驱动**。Docker Desktop for Windows 自带 GPU 支持，无需另装 `nvidia-container-toolkit`；没有显卡时 `nlp` 容器会因请求不到设备而起不来，此时其余服务（ASR/TTS/翻译）仍可用，文本 AI 会降级为 Mock
+- **启动后约 30 秒模型才就绪**（2.4GB 权重加载进显存）。这段时间 `/health` 返回 503，gateway 按既有的失败降级策略先返回 Mock 结果，就绪后自动恢复，不需要干预
+- **上下文固定 4096，不要调大**：4GB 显存下这已是上限（实测 3786/4096 MiB 已用）。同理 `-b 512 -ub 512` 也不能省，原因写在 `docker-compose.yml` 里 `nlp` 服务的注释中
+- 显卡显存小于 4GB 时可能装不下，先用 `docker compose logs nlp` 看有没有 `failed to fit params` 之类的报错
 
 ### 联网要求
 
-**运行时完全离线**，但首次部署需要联网拉取以下几类资源。任何一步失败，对应功能都会明确报错而非静默降级：
+**运行时完全离线**，但首次部署需要联网拉取以下几类资源。任何一步失败，对应功能都会明确报错（前端显示黄色「模拟」徽章），而不是假装返回真实结果：
 
 | 阶段 | 拉取内容 | 失败后果 |
 |------|----------|----------|
@@ -63,7 +126,7 @@
 | 下载模型 | HuggingFace 权重（脚本自动替换为 hf-mirror） | 模型不可用，模型页显示「可下载」 |
 | 首次翻译 | MTranServer 按语言对下载模型到 `models/mtran/` | 该语言对翻译失败 |
 
-海外网络可将各 `Dockerfile` 里的 `PIP_INDEX_URL` 改为 `https://pypi.org/simple`，并把 `.env` 里的 `HF_ENDPOINT` 改为 `https://huggingface.co`（控制容器内的两处下载：TTS 拉取 g2pW 注音模型、Web 面板「模型管理」页下载模型）。
+海外网络构建时传 `--build-arg PIP_INDEX_URL=https://pypi.org/simple`（见下节），并把 `.env` 里的 `HF_ENDPOINT` 改为 `https://huggingface.co`（控制容器内的两处下载：TTS 拉取 g2pW 注音模型、Web 面板「模型管理」页下载模型）。
 
 ### 版本锁定说明
 
@@ -71,7 +134,7 @@
 
 升级某个包时请整体构建测试后，再同步修改对应 `requirements.txt`。
 
-### 构建源可替换
+### 构建源与网络问题
 
 各 `Dockerfile` 顶部的 `ARG` 可按网络环境覆盖：
 
@@ -80,10 +143,25 @@
 | `PIP_INDEX_URL` | 清华 PyPI 镜像 | 所有服务的 pip 依赖 |
 
 ```bash
+# 清华源不可达或下载极慢时，改用腾讯源
+docker compose --profile full build \
+  --build-arg PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
+
 # 海外网络可整体切回官方源
 docker compose --profile full build \
   --build-arg PIP_INDEX_URL=https://pypi.org/simple
 ```
+
+> 如果 `setup.sh` 里的 gateway 构建卡住，先手动构建再启动：
+>
+> ```bash
+> docker compose build --build-arg PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple gateway
+> docker compose --profile full up -d
+> ```
+
+`asr` 的 Debian apt 源已在 Dockerfile 里默认改为腾讯镜像，无需额外处理。
+
+**Docker Desktop 需要代理时**：Settings → Resources → Proxies → Manual proxy configuration，HTTP/HTTPS 都填代理地址（如 `http://192.168.3.254:10809`），保存后重启 Docker Desktop。
 
 模型下载脚本的源同样可覆盖：`HF_MIRROR`（HuggingFace 镜像）。
 
@@ -100,59 +178,7 @@ HF_MIRROR=https://huggingface.co ./scripts/download-models.sh all
 >
 > 命令行下载和面板下载走的是两套独立代码，只改一个不会影响另一个。
 
-### 1. 克隆项目
-
-```bash
-git clone https://github.com/k3vi-07/local-ai-swiss-army.git
-cd local-ai-swiss-army
-```
-
-### 2. 一键安装
-
-```bash
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-```
-
-脚本会自动：
-- 创建模型目录
-- 复制 `.env` 配置
-- 构建 Gateway 镜像
-
-### 3. 启动服务
-
-**Mock 模式（无需模型，秒级启动）：**
-
-```bash
-docker compose up -d gateway
-```
-
-访问 `http://localhost:8000`，所有服务返回模拟数据。
-
-> 模拟输出的文本统一带 `[模拟]` 前缀，前端同时显示黄色「模拟」徽章。这样即使只部署了部分服务（例如只起了 nlp、mtran 容器没起），也不会把模拟结果误认为真实翻译/识别结果。
-
-**完整模式（下载模型 + 启动所有服务）：**
-
-```bash
-# 下载可用模型（约 2.7GB）
-./scripts/download-models.sh all
-
-# 构建并启动全部服务
-docker compose --profile full up -d --build
-```
-
-**文本 AI 需要 NVIDIA 显卡：**
-
-本项目是私人定制，文本 AI（`nlp` 服务）**只跑 GPU**，用官方 llama.cpp CUDA 镜像，实测 18.7 tok/s、首 token 142ms（同样的模型在 CPU 上只有 7.3 tok/s）。所以 `--profile full` 起 `nlp` 时机器必须有可用的 NVIDIA 显卡。
-
-几点注意：
-
-- **需要可用的 NVIDIA 驱动**。Docker Desktop for Windows 自带 GPU 支持，无需另装 `nvidia-container-toolkit`；没有显卡时 `nlp` 容器会因请求不到设备而起不来，此时其余服务（ASR/TTS/翻译）仍可用，文本 AI 会降级为 Mock
-- **启动后约 30 秒模型才就绪**（2.4GB 权重加载进显存）。这段时间 `/health` 返回 503，gateway 按既有的失败降级策略先返回 Mock 结果，就绪后自动恢复，不需要干预
-- **上下文固定 4096，不要调大**：4GB 显存下这已是上限（实测 3786/4096 MiB 已用）。同理 `-b 512 -ub 512` 也不能省，原因写在 `docker-compose.yml` 里 `nlp` 服务的注释中
-- 显卡显存小于 4GB 时可能装不下，先用 `docker compose logs nlp` 看有没有 `failed to fit params` 之类的报错
-
-### 4. Web 面板下载模型
+### Web 面板下载模型
 
 也可以通过 Web 面板管理模型：
 
@@ -161,7 +187,7 @@ docker compose --profile full up -d --build
 3. 点击「一键下载全部可用模型」或逐个下载
 4. 下载完成后重启服务：`docker compose --profile full restart`
 
-### 5. 切换 TTS 中文语音
+### 切换 TTS 中文语音
 
 内置两个 Piper 中文语音，默认使用**小雅**：
 
@@ -187,7 +213,7 @@ curl -X POST http://localhost:8000/tts -H 'Content-Type: application/json' \
 
 > 拼音方案（小雅）依赖 g2pW 注音模型（约 152MB），已随 `./scripts/download-models.sh tts` 一并下载到 `models/tts/g2pW/`；若缺失，服务首次合成时会自动从 `HF_ENDPOINT`（默认 hf-mirror）拉取。
 
-### 6. 对接沉浸式翻译（浏览器扩展）
+### 对接沉浸式翻译（浏览器扩展）
 
 MTranServer 自带 `/imme` 端点，可直接作为沉浸式翻译的「自定义 API」后端，**无需任何适配代码**。
 
@@ -525,7 +551,7 @@ local-ai-swiss-army/
 A: 国内网络可能需要配置代理或使用镜像。运行 `./scripts/download-models.sh` 在宿主机下载。
 
 **Q: 构建很慢？**
-A: ASR 服务需要编译 C++ 依赖（faster-whisper），首次构建约 5-10 分钟。文本 AI 用的是官方 llama.cpp CUDA 镜像，不参与构建。
+A: ASR 需要 apt 安装 `build-essential`/`ffmpeg` 并编译 C++ 依赖；首次 `--profile full` 还要拉取约 7GB 的 llama.cpp CUDA 镜像（文本 AI 直接用它，不参与构建）。网络慢时按上面的「构建源与网络问题」处理。
 
 **Q: 只想重建其中一个服务（如 TTS）？**
 A: 不要用 `--profile full` 配合 `up --build` —— 它会重建该 profile 下的**所有**服务（含 asr 的大依赖，数 GB 下载）。分开两步执行：
